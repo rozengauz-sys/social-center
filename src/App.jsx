@@ -382,7 +382,7 @@ function exportExcel(families) {
     }
   });
 
-  const csv = rows.map(r => r.map(c => `"${String(c||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const csv = rows.map(r => r.map(c => `"${String(c||"").replace(/"/g,'""')}"`).join(";")).join("\n");
   const BOM = "\uFEFF";
   const blob = new Blob([BOM+csv], { type:"text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
