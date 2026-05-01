@@ -220,7 +220,7 @@ const emptyMember = () => ({
   jcc: { active: false, programs: [] }
 });
 
-function MembersEditor({ members, onChange, allPrograms }) {
+function MembersEditor({ members, onChange, allPrograms, isHesed }) {
   const add = () => onChange([...members, emptyMember()]);
   const upd = (id, field, val) => onChange(members.map(m=>m.id===id?{...m,[field]:val}:m));
   const updMember = (id, updated) => onChange(members.map(m=>m.id===id?updated:m));
@@ -256,7 +256,7 @@ function MembersEditor({ members, onChange, allPrograms }) {
               <span style={{ fontSize:13, fontWeight:700, color:"#0891b2" }}>&#129309; Волонтёр</span>
             </label>
           </div>
-          <MemberJCC member={m} allPrograms={allPrograms} onChange={updated=>updMember(m.id,updated)} />
+          {!isHesed && <MemberJCC member={m} allPrograms={allPrograms} onChange={updated=>updMember(m.id,updated)} />}
         </div>
       ))}
       <button onClick={add} style={{ ...btnSecondary, alignSelf:"flex-start", fontSize:13 }}>➕ Добавить члена семьи</button>
@@ -488,7 +488,7 @@ const emptyFamily = () => ({
   aid:[], visits:[], members:[emptyMember()], jccPrograms:[]
 });
 
-function FamilyModal({ family, onSave, onClose, allPrograms }) {
+function FamilyModal({ family, onSave, onClose, allPrograms, isHesed }) {
   const [form, setForm] = useState(family ? {...family} : emptyFamily());
   const [saving, setSaving] = useState(false);
   const set = (f,v) => setForm(x=>({...x,[f]:v}));
@@ -523,7 +523,7 @@ function FamilyModal({ family, onSave, onClose, allPrograms }) {
             <textarea style={{ ...inputStyle, height:72, resize:"vertical" }} value={form.comment} onChange={e=>set("comment",e.target.value)} placeholder="Дополнительные заметки..." />
           </label>
           <SectionToggle label="Члены семьи" icon="👥" defaultOpen={true} badge={form.members.length}>
-            <MembersEditor members={form.members} onChange={v=>set("members",v)} allPrograms={allPrograms} />
+            <MembersEditor members={form.members} onChange={v=>set("members",v)} allPrograms={allPrograms} isHesed={isHesed} />
           </SectionToggle>
           <SectionToggle label="Оценка критериев (0–5)" icon="📊" defaultOpen={false}>
             <CriteriaSliders value={form.criteria} onChange={v=>set("criteria",v)} />
@@ -554,7 +554,7 @@ function FamilyModal({ family, onSave, onClose, allPrograms }) {
 }
 
 // ── Family Card ───────────────────────────────────────────────────────────
-function FamilyCard({ family, onEdit, onDelete, isJCC }) {
+function FamilyCard({ family, onEdit, onDelete, isJCC, isHesed }) {
   const [expanded, setExpanded] = useState(false);
   const totalAid = (family.aid||[]).reduce((s,a)=>s+(parseFloat(a.amount)||0),0);
   const visitCount = (family.visits||[]).length;
@@ -616,7 +616,7 @@ function FamilyCard({ family, onEdit, onDelete, isJCC }) {
                     {m.phone && <span>📞 {m.phone}</span>}
                     {m.email && <span>✉️ {m.email}</span>}
                   </div>
-                  {m.jcc?.active && (m.jcc.programs||[]).length>0 && (
+                  {m.jcc?.active && (m.jcc.programs||[]).length>0 && !isHesed && (
                     <div style={{ marginTop:6, paddingTop:6, borderTop:"1px solid #e2e8f0" }}>
                       <div style={{ fontSize:11, fontWeight:700, color:"#0284c7", marginBottom:4 }}>Программы JCC:</div>
                       {m.jcc.programs.map(p=>(
@@ -787,6 +787,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState("family"); // family | person
 
   const isJCC = userRole === "jcc";
+  const isHesed = userRole === "hesed";
 
   useEffect(() => {
     supabase.auth.getSession().then(({data}) => {
@@ -897,7 +898,7 @@ export default function App() {
           </div>
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
             {!isJCC && <ExcelDropdown families={families} filtered={filtered} hasFilters={hasFilters} />}
-            {!isJCC && <button onClick={()=>setShowPrograms(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>🏛 Программы JCC</button>}
+            {!isJCC && !isHesed && <button onClick={()=>setShowPrograms(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>🏛 Программы JCC</button>}
             <button onClick={()=>setModal("new")} style={{ ...btnPrimary,background:"rgba(255,255,255,0.2)",border:"1px solid rgba(255,255,255,0.4)" }}>➕ Новая семья</button>
             <button onClick={handleLogout} style={{ ...btnSecondary,background:"transparent",color:"#fff",borderColor:"rgba(255,255,255,0.3)" }}>🚪</button>
           </div>
@@ -945,7 +946,7 @@ export default function App() {
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           {viewMode==="family" ? <>
             {filtered.length===0 && <EmptyState hasFilters={hasFilters} onReset={resetFilters} />}
-            {filtered.map(f=><FamilyCard key={f.id} family={f} onEdit={setModal} onDelete={deleteFamily} isJCC={isJCC} />)}
+            {filtered.map(f=><FamilyCard key={f.id} family={f} onEdit={setModal} onDelete={deleteFamily} isJCC={isJCC} isHesed={isHesed} />)}
           </> : <>
             {allPersons.length===0 && <EmptyState hasFilters={hasFilters} onReset={resetFilters} />}
             {allPersons.map(({member,family})=><PersonCard key={`${family.id}-${member.id}`} member={member} family={family} isJCC={isJCC} />)}
@@ -954,7 +955,7 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {modal && <FamilyModal family={modal==="new"?null:modal} onSave={saveFamily} onClose={()=>setModal(null)} allPrograms={allPrograms} />}
+      {modal && <FamilyModal family={modal==="new"?null:modal} onSave={saveFamily} onClose={()=>setModal(null)} allPrograms={allPrograms} isHesed={isHesed} />}
 
       {showPrograms && (
         <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.75)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
