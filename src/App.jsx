@@ -216,6 +216,7 @@ function MemberJCC({ member, allPrograms, onChange }) {
 const emptyMember = () => ({
   id: Date.now() + Math.random(),
   lastName:"", firstName:"", dob:"", relation:"", misCode:"", phone:"", email:"",
+  isMadrich: false, isVolunteer: false,
   jcc: { active: false, programs: [] }
 });
 
@@ -244,6 +245,16 @@ function MembersEditor({ members, onChange, allPrograms }) {
             <label style={labelStyle}>Код MIS<input style={inputStyle} value={m.misCode} onChange={e=>upd(m.id,"misCode",e.target.value)} placeholder="MIS-001" /></label>
             <label style={labelStyle}>Телефон<input style={inputStyle} value={m.phone} onChange={e=>upd(m.id,"phone",e.target.value)} placeholder="+972-50-000-0000" /></label>
             <label style={{ ...labelStyle, gridColumn:"1/-1" }}>Email<input type="email" style={inputStyle} value={m.email} onChange={e=>upd(m.id,"email",e.target.value)} placeholder="ivan@example.com" /></label>
+          </div>
+          <div style={{ display:"flex", gap:20, marginTop:10, flexWrap:"wrap" }}>
+            <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+              <input type="checkbox" checked={!!m.isMadrich} onChange={e=>upd(m.id,"isMadrich",e.target.checked)} style={{ accentColor:"#7c3aed", width:16, height:16 }} />
+              <span style={{ fontSize:13, fontWeight:700, color:"#7c3aed" }}>&#127891; Мадрих</span>
+            </label>
+            <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+              <input type="checkbox" checked={!!m.isVolunteer} onChange={e=>upd(m.id,"isVolunteer",e.target.checked)} style={{ accentColor:"#0891b2", width:16, height:16 }} />
+              <span style={{ fontSize:13, fontWeight:700, color:"#0891b2" }}>&#129309; Волонтёр</span>
+            </label>
           </div>
           <MemberJCC member={m} allPrograms={allPrograms} onChange={updated=>updMember(m.id,updated)} />
         </div>
@@ -370,7 +381,7 @@ function VisitsReadOnly({ visits }) {
 
 // ── Excel Export ──────────────────────────────────────────────────────────
 function exportExcel(families) {
-  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Код MIS","Телефон","Email","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
+  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Код MIS","Телефон","Email","Мадрих","Волонтёр","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
   const rows = [headers];
   families.forEach(f => {
     const totalAid = (f.aid||[]).reduce((s,a)=>s+(parseFloat(a.amount)||0),0);
@@ -385,6 +396,8 @@ function exportExcel(families) {
         age !== null ? age : "—",
         m?.dob ? (isMinor(m.dob)?"Да":"Нет") : "—",
         m?.relation||"", m?.misCode||"", m?.phone||"", m?.email||"",
+        m?.isMadrich?"Да":"Нет",
+        m?.isVolunteer?"Да":"Нет",
         f.city||"", f.address||"",
         f.specialNeeds?"Да":"Нет",
         f.socialCenter?"Да":"Нет",
@@ -561,6 +574,8 @@ function FamilyCard({ family, onEdit, onDelete, isJCC }) {
             {family.socialCenter && <span style={{ background:"#d1fae5",color:"#065f46",border:"1px solid #6ee7b7",borderRadius:5,padding:"1px 7px",fontSize:11,fontWeight:700 }}>🏥 Соц.центр</span>}
             {hasJCC && <span style={{ background:"#e0f2fe",color:"#0369a1",border:"1px solid #7dd3fc",borderRadius:5,padding:"1px 7px",fontSize:11,fontWeight:700 }}>🏛 JCC</span>}
             {hasMinors && <span style={{ background:"#fef9c3",color:"#713f12",border:"1px solid #fde047",borderRadius:5,padding:"1px 7px",fontSize:11,fontWeight:700 }}>👶 Дети</span>}
+            {members.some(m=>m.isMadrich) && <span style={{ background:"#ede9fe",color:"#6d28d9",border:"1px solid #c4b5fd",borderRadius:5,padding:"1px 7px",fontSize:11,fontWeight:700 }}>🎓 Мадрих</span>}
+            {members.some(m=>m.isVolunteer) && <span style={{ background:"#cffafe",color:"#0e7490",border:"1px solid #67e8f9",borderRadius:5,padding:"1px 7px",fontSize:11,fontWeight:700 }}>🤝 Волонтёр</span>}
           </div>
           <div style={{ fontSize:13, color:"#64748b", marginTop:2 }}>
             {members.map(m=>`${m.firstName} ${m.lastName}`).join(", ")||"Нет членов"}
@@ -592,6 +607,8 @@ function FamilyCard({ family, onEdit, onDelete, isJCC }) {
                     {m.relation && <span style={{ fontWeight:400, color:"#6366f1", fontSize:13 }}>· {m.relation}</span>}
                     {isMinor(m.dob) && <span style={{ background:"#fef9c3",color:"#713f12",border:"1px solid #fde047",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>👶 несовершеннолетний</span>}
                     {m.jcc?.active && <span style={{ background:"#e0f2fe",color:"#0369a1",border:"1px solid #7dd3fc",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🏛 JCC</span>}
+                    {m.isMadrich && <span style={{ background:"#ede9fe",color:"#6d28d9",border:"1px solid #c4b5fd",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🎓 Мадрих</span>}
+                    {m.isVolunteer && <span style={{ background:"#cffafe",color:"#0e7490",border:"1px solid #67e8f9",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🤝 Волонтёр</span>}
                   </div>
                   <div style={{ display:"flex", gap:12, flexWrap:"wrap", fontSize:13, color:"#64748b" }}>
                     {m.dob && <span>📅 {formatDate(m.dob)}{calcAge(m.dob)!==null?` (${calcAge(m.dob)} лет)`:""}</span>}
@@ -661,6 +678,8 @@ function PersonCard({ member, family, isJCC }) {
             {member.relation && <span style={{ fontSize:12, color:"#6366f1", fontWeight:600 }}>{member.relation}</span>}
             {isMinor(member.dob) && <span style={{ background:"#fef9c3",color:"#713f12",border:"1px solid #fde047",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>👶</span>}
             {member.jcc?.active && <span style={{ background:"#e0f2fe",color:"#0369a1",border:"1px solid #7dd3fc",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🏛 JCC</span>}
+            {member.isMadrich && <span style={{ background:"#ede9fe",color:"#6d28d9",border:"1px solid #c4b5fd",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🎓 Мадрих</span>}
+            {member.isVolunteer && <span style={{ background:"#cffafe",color:"#0e7490",border:"1px solid #67e8f9",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🤝 Волонтёр</span>}
           </div>
           <div style={{ fontSize:12, color:"#64748b", marginTop:2 }}>
             🏠 {family.familyName} · {member.dob?`${formatDate(member.dob)}${age!==null?` (${age} лет)`:""}`:""} {member.phone?`· 📞 ${member.phone}`:""}
@@ -703,6 +722,29 @@ function PersonCard({ member, family, isJCC }) {
               ))}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Excel Dropdown ────────────────────────────────────────────────────────
+function ExcelDropdown({ families, filtered, hasFilters }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position:"relative" }}>
+      <button onClick={()=>setOpen(o=>!o)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13,display:"flex",alignItems:"center",gap:6 }}>
+        📊 CSV ▾
+      </button>
+      {open && (
+        <div style={{ position:"absolute", top:"calc(100% + 6px)", right:0, background:"#fff", borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.15)", border:"1px solid #e2e8f0", zIndex:50, minWidth:200, overflow:"hidden" }}
+          onMouseLeave={()=>setOpen(false)}>
+          <button onClick={()=>{exportExcel(families);setOpen(false);}} style={{ width:"100%",padding:"11px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:600,color:"#374151",borderBottom:"1px solid #f1f5f9" }}>
+            📊 Экспорт всех ({families.length} семей)
+          </button>
+          <button onClick={()=>{exportExcel(filtered);setOpen(false);}} style={{ width:"100%",padding:"11px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:600,color:hasFilters?"#6366f1":"#94a3b8" }}>
+            🔍 Экспорт отфильтрованных ({filtered.length})
+          </button>
         </div>
       )}
     </div>
@@ -785,6 +827,8 @@ export default function App() {
       if (filter==="urgent") { const d=daysUntil(f.nextVisit); if(d===null||d>30) return false; }
       if (filter==="jcc" && !(f.members||[]).some(m=>m.jcc?.active)) return false;
       if (filter==="children" && !(f.members||[]).some(m=>isMinor(m.dob))) return false;
+      if (filter==="madrich" && !(f.members||[]).some(m=>m.isMadrich)) return false;
+      if (filter==="volunteer" && !(f.members||[]).some(m=>m.isVolunteer)) return false;
       return true;
     });
   }, [families, search, filter]);
@@ -796,6 +840,8 @@ export default function App() {
       (f.members||[]).forEach(m => {
         if (filter==="children" && !isMinor(m.dob)) return;
         if (filter==="jcc" && !m.jcc?.active) return;
+        if (filter==="madrich" && !m.isMadrich) return;
+        if (filter==="volunteer" && !m.isVolunteer) return;
         persons.push({ member:m, family:f });
       });
     });
@@ -850,8 +896,7 @@ export default function App() {
             </div>
           </div>
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-            {!isJCC && <button onClick={()=>exportExcel(filtered)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>📊 CSV {hasFilters?"(фильтр)":"(все)"}</button>}
-            {!isJCC && <button onClick={()=>exportPDF(filtered)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>📄 PDF {hasFilters?"(фильтр)":"(все)"}</button>}
+            {!isJCC && <ExcelDropdown families={families} filtered={filtered} hasFilters={hasFilters} />}
             {!isJCC && <button onClick={()=>setShowPrograms(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>🏛 Программы JCC</button>}
             <button onClick={()=>setModal("new")} style={{ ...btnPrimary,background:"rgba(255,255,255,0.2)",border:"1px solid rgba(255,255,255,0.4)" }}>➕ Новая семья</button>
             <button onClick={handleLogout} style={{ ...btnSecondary,background:"transparent",color:"#fff",borderColor:"rgba(255,255,255,0.3)" }}>🚪</button>
@@ -881,6 +926,8 @@ export default function App() {
             {k:"urgent",l:"🔴 Срочные"},
             {k:"jcc",l:"🏛 JCC"},
             {k:"children",l:"👶 Дети"},
+            {k:"madrich",l:"🎓 Мадрихи"},
+            {k:"volunteer",l:"🤝 Волонтёры"},
           ].map(({k,l})=>(
             <button key={k} onClick={()=>setFilter(k)} style={{
               padding:"7px 12px", borderRadius:8, border:"1px solid", cursor:"pointer", fontWeight:600, fontSize:12,
