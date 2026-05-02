@@ -1239,6 +1239,55 @@ function LogsModal({ onClose }) {
   );
 }
 
+// ── JCC Filter Dropdown ───────────────────────────────────────────────────
+function JCCFilterDropdown({ filter, setFilter, allPrograms }) {
+  const [open, setOpen] = useState(false);
+  const isActive = filter === "jcc" || filter.startsWith("jcc:");
+  const activeLabel = filter === "jcc" ? "Все JCC"
+    : filter.startsWith("jcc:") ? filter.slice(4)
+    : null;
+
+  return (
+    <div style={{ position:"relative" }}>
+      <button onClick={()=>setOpen(o=>!o)} style={{
+        padding:"7px 12px", borderRadius:8, border:"1px solid", cursor:"pointer", fontWeight:600, fontSize:12,
+        background:isActive?"#0284c7":"#fff",
+        color:isActive?"#fff":"#475569",
+        borderColor:isActive?"#0284c7":"#e2e8f0",
+        display:"flex", alignItems:"center", gap:5
+      }}>
+        🏛 {activeLabel || "JCC"} ▾
+      </button>
+      {open && (
+        <div style={{
+          position:"absolute", top:"calc(100% + 6px)", left:0, background:"#fff",
+          borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.15)", border:"1px solid #e2e8f0",
+          zIndex:50, minWidth:200, overflow:"hidden"
+        }} onMouseLeave={()=>setOpen(false)}>
+          <button onClick={()=>{setFilter("jcc");setOpen(false);}} style={{
+            width:"100%", padding:"10px 14px", background:filter==="jcc"?"#e0f2fe":"none",
+            border:"none", borderBottom:"1px solid #f1f5f9", cursor:"pointer",
+            textAlign:"left", fontSize:13, fontWeight:700, color:"#0284c7"
+          }}>
+            🏛 Все JCC
+          </button>
+          {allPrograms.map(prog=>(
+            <button key={prog.id} onClick={()=>{setFilter(`jcc:${prog.name}`);setOpen(false);}} style={{
+              width:"100%", padding:"9px 14px 9px 24px",
+              background:filter===`jcc:${prog.name}`?"#e0f2fe":"none",
+              border:"none", borderBottom:"1px solid #f8fafc", cursor:"pointer",
+              textAlign:"left", fontSize:13, fontWeight:600,
+              color:filter===`jcc:${prog.name}`?"#0284c7":"#374151"
+            }}>
+              {filter===`jcc:${prog.name}`?"✓ ":""}{prog.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Excel Dropdown ────────────────────────────────────────────────────────
 function ExcelDropdown({ families, filtered, hasFilters }) {
   const [open, setOpen] = useState(false);
@@ -1340,6 +1389,11 @@ export default function App() {
       if (filter==="specialNeeds" && !f.specialNeeds) return false;
       if (filter==="urgent") { const d=daysUntil(f.nextVisit); if(d===null||d>30) return false; }
       if (filter==="jcc" && !(f.members||[]).some(m=>m.jcc?.active)) return false;
+      if (filter.startsWith("jcc:")) {
+        const progName = filter.slice(4).toLowerCase();
+        const hasIt = (f.members||[]).some(m=>m.jcc?.active && (m.jcc.programs||[]).some(p=>p.name.toLowerCase()===progName));
+        if (!hasIt) return false;
+      }
       if (filter==="children" && !(f.members||[]).some(m=>isMinor(m.dob))) return false;
       if (filter==="madrich" && !(f.members||[]).some(m=>m.isMadrich)) return false;
       if (filter==="volunteer" && !(f.members||[]).some(m=>m.isVolunteer)) return false;
@@ -1354,6 +1408,10 @@ export default function App() {
       (f.members||[]).forEach(m => {
         if (filter==="children" && !isMinor(m.dob)) return;
         if (filter==="jcc" && !m.jcc?.active) return;
+        if (filter.startsWith("jcc:")) {
+          const progName = filter.slice(4).toLowerCase();
+          if (!m.jcc?.active || !(m.jcc.programs||[]).some(p=>p.name.toLowerCase()===progName)) return;
+        }
         if (filter==="madrich" && !m.isMadrich) return;
         if (filter==="volunteer" && !m.isVolunteer) return;
         persons.push({ member:m, family:f });
@@ -1564,7 +1622,6 @@ export default function App() {
             {k:"all",l:"Все"},
             {k:"specialNeeds",l:"⭐ Special Needs"},
             {k:"urgent",l:"🔴 Срочные"},
-            {k:"jcc",l:"🏛 JCC"},
             {k:"children",l:"👶 Дети"},
             {k:"madrich",l:"🎓 Мадрихи"},
             {k:"volunteer",l:"🤝 Волонтёры"},
@@ -1574,6 +1631,7 @@ export default function App() {
               background:filter===k?"#6366f1":"#fff", color:filter===k?"#fff":"#475569", borderColor:filter===k?"#6366f1":"#e2e8f0"
             }}>{l}</button>
           ))}
+          <JCCFilterDropdown filter={filter} setFilter={setFilter} allPrograms={allPrograms} />
           {hasFilters && <button onClick={resetFilters} style={{ ...btnSecondary,color:"#dc2626",borderColor:"#fca5a5",fontSize:13 }}>✕ Сбросить</button>}
         </div>
 
