@@ -728,6 +728,418 @@ function PersonCard({ member, family, isJCC }) {
   );
 }
 
+// ── Template Download ─────────────────────────────────────────────────────
+function downloadTemplate() {
+  const headers = [
+    "Название семьи *",
+    "Фамилия *",
+    "Имя *",
+    "Дата рождения (ДД.ММ.ГГГГ)",
+    "Степень родства",
+    "Код MIS",
+    "Телефон",
+    "Email",
+    "Город",
+    "Адрес (общий для семьи)",
+    "Special Needs (Да/Нет)",
+    "Социальный центр (Да/Нет)",
+    "Мадрих (Да/Нет)",
+    "Волонтёр (Да/Нет)",
+    "JCC (Да/Нет)",
+    "Программы JCC (через запятую)"
+  ];
+  const example1 = ["Семья Иванов","Иванов","Иван","15.03.1942","Глава семьи","MIS-001","+972501234567","ivan@example.com","Тель-Авив","ул. Герцля 5","Нет","Да","Нет","Нет","Да","Беяхад Кидс, Лекции"];
+  const example2 = ["Семья Иванов","Иванова","Сара","22.07.1945","Супруга","MIS-002","+972501234568","","Тель-Авив","ул. Герцля 5","Да","Да","Нет","Нет","Нет",""];
+  const example3 = ["Семья Коэн","Коэн","Давид","01.01.1938","","MIS-003","","","Хайфа","пр. Мира 12","Нет","Нет","Нет","Да","Да","Лагеря"];
+
+  const rows = [headers, example1, example2, example3];
+  const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\n");
+  const blob = new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href=url; a.download="import_template.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Parse date from DD.MM.YYYY or YYYY-MM-DD ──────────────────────────────
+function parseImportDate(str) {
+  if (!str) return "";
+  str = str.trim();
+  if (/^\d{2}\.\d{2}\.\d{4}$/.test(str)) {
+    const [d,m,y] = str.split(".");
+    return `${y}-${m}-${d}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  return "";
+}
+
+function parseBool(str) {
+  if (!str) return false;
+  return str.trim().toLowerCase() === "да" || str.trim().toLowerCase() === "yes";
+}
+
+// ── Import Modal ──────────────────────────────────────────────────────────
+function ImportModal({ onClose, allPrograms, families, setFamilies, session }) {
+  const [file, setFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [report, setReport] = useState(null);
+
+  const handleFile = (e) => setFile(e.target.files[0]);
+
+  const runImport = async () => {
+    if (!file) return;
+    setImporting(true);
+
+    const text = await file.text();
+    const lines = text.split("\n").filter(l=>l.trim());
+    // Skip header row
+    const dataLines = lines.slice(1);
+
+    // Parse CSV respecting quoted fields
+    const parseCSVLine = (line) => {
+      const result = [];
+      let cur = "", inQ = false;
+      for (let i=0; i<line.length; i++) {
+        const c = line[i];
+        if (c==='"') { inQ = !inQ; }
+        else if ((c===";"||c===",") && !inQ) { result.push(cur.trim()); cur=""; }
+        else { cur += c; }
+      }
+      result.push(cur.trim());
+      return result.map(s=>s.replace(/^"|"$/g,"").replace(/""/g,'"').trim());
+    };
+
+    const rows = dataLines.map(parseCSVLine).filter(r=>r[0]||r[1]);
+
+    // Group rows by family name
+    const familyMap = {};
+    rows.forEach(r => {
+      const familyName = r[0]?.trim();
+      if (!familyName) return;
+      if (!familyMap[familyName]) familyMap[familyName] = [];
+      familyMap[familyName].push(r);
+    });
+
+    const created = [];
+    const updated = [];
+    const errors = [];
+
+    // Load fresh families from DB
+    const { data: dbFamilies } = await supabase.from("families").select("*").order("family_name");
+    const currentFamilies = (dbFamilies||[]).map(fromDB);
+
+    for (const [familyName, rows] of Object.entries(familyMap)) {
+      try {
+        const existingFamily = currentFamilies.find(f=>f.familyName.trim().toLowerCase()===familyName.toLowerCase());
+
+        const newMembers = rows.map(r => {
+          const jccActive = parseBool(r[14]);
+          const jccProgramNames = (r[15]||"").split(",").map(s=>s.trim()).filter(Boolean);
+          const jccPrograms = jccProgramNames.map(name => {
+            const prog = allPrograms.find(p=>p.name.toLowerCase()===name.toLowerCase());
+            return prog ? { id:prog.id, name:prog.name, notes:"" } : { id:Date.now()+Math.random(), name, notes:"" };
+          });
+          return {
+            id: Date.now() + Math.random(),
+            lastName: r[1]?.trim()||"",
+            firstName: r[2]?.trim()||"",
+            dob: parseImportDate(r[3]),
+            relation: r[4]?.trim()||"",
+            misCode: r[5]?.trim()||"",
+            phone: r[6]?.trim()||"",
+            email: r[7]?.trim()||"",
+            isMadrich: parseBool(r[12]),
+            isVolunteer: parseBool(r[13]),
+            jcc: { active: jccActive, programs: jccPrograms }
+          };
+        }).filter(m=>m.lastName&&m.firstName);
+
+        if (!existingFamily) {
+          // Create new family
+          const firstRow = rows[0];
+          const newFamily = {
+            familyName,
+            city: firstRow[8]?.trim()||"",
+            address: firstRow[9]?.trim()||"",
+            specialNeeds: parseBool(firstRow[10]),
+            socialCenter: parseBool(firstRow[11]),
+            criteria: {0:0,1:0,2:0,3:0,4:0},
+            comment: "",
+            nextVisit: "",
+            aid: [],
+            visits: [],
+            members: newMembers,
+            jccPrograms: []
+          };
+          const { data, error } = await supabase.from("families").insert(toDB(newFamily)).select();
+          if (error) { errors.push({ family:familyName, error:error.message }); continue; }
+          const saved = fromDB(data[0]);
+          setFamilies(prev=>[...prev, saved]);
+          created.push({ family:familyName, members:newMembers.map(m=>`${m.lastName} ${m.firstName}`) });
+        } else {
+          // Update existing family — match members by lastName+firstName+dob
+          const changes = [];
+          const updatedMembers = [...existingFamily.members];
+
+          for (const newM of newMembers) {
+            const key = `${newM.lastName}|${newM.firstName}|${newM.dob}`.toLowerCase();
+            const existIdx = updatedMembers.findIndex(m=>
+              `${m.lastName}|${m.firstName}|${m.dob}`.toLowerCase() === key
+            );
+            if (existIdx >= 0) {
+              // Update existing member — track changes
+              const old = updatedMembers[existIdx];
+              const fieldChanges = [];
+              const checkField = (label, oldVal, newVal) => {
+                if (newVal && String(newVal).trim() !== String(oldVal||"").trim()) {
+                  fieldChanges.push({ field:label, was:oldVal||"(пусто)", became:newVal });
+                }
+              };
+              checkField("Телефон", old.phone, newM.phone);
+              checkField("Email", old.email, newM.email);
+              checkField("Код MIS", old.misCode, newM.misCode);
+              checkField("Степень родства", old.relation, newM.relation);
+              checkField("Мадрих", old.isMadrich?"Да":"Нет", newM.isMadrich?"Да":"Нет");
+              checkField("Волонтёр", old.isVolunteer?"Да":"Нет", newM.isVolunteer?"Да":"Нет");
+              const oldJCC = old.jcc?.active?"Да":"Нет";
+              const newJCC = newM.jcc?.active?"Да":"Нет";
+              checkField("JCC", oldJCC, newJCC);
+              if (newM.jcc?.active) {
+                const oldProgs = (old.jcc?.programs||[]).map(p=>p.name).join(", ");
+                const newProgs = (newM.jcc?.programs||[]).map(p=>p.name).join(", ");
+                checkField("Программы JCC", oldProgs, newProgs);
+              }
+              if (fieldChanges.length>0) {
+                changes.push({ person:`${newM.lastName} ${newM.firstName}`, fields:fieldChanges });
+              }
+              updatedMembers[existIdx] = { ...old, ...newM, id:old.id };
+            } else {
+              // New person in existing family
+              updatedMembers.push(newM);
+              changes.push({ person:`${newM.lastName} ${newM.firstName}`, fields:[{ field:"Статус", was:"", became:"Новый участник добавлен в семью" }] });
+            }
+          }
+
+          // Update family-level fields
+          const firstRow = rows[0];
+          const familyChanges = [];
+          const checkFam = (label, oldVal, newVal) => {
+            if (newVal && String(newVal).trim()!==String(oldVal||"").trim()) {
+              familyChanges.push({ field:label, was:oldVal||"(пусто)", became:newVal });
+            }
+          };
+          const newCity = firstRow[8]?.trim()||"";
+          const newAddress = firstRow[9]?.trim()||"";
+          const newSN = parseBool(firstRow[10]);
+          const newSC = parseBool(firstRow[11]);
+          checkFam("Город", existingFamily.city, newCity);
+          checkFam("Адрес", existingFamily.address, newAddress);
+          checkFam("Special Needs", existingFamily.specialNeeds?"Да":"Нет", newSN?"Да":"Нет");
+          checkFam("Соц. центр", existingFamily.socialCenter?"Да":"Нет", newSC?"Да":"Нет");
+          if (familyChanges.length>0) changes.push({ person:"[Семья]", fields:familyChanges });
+
+          const updatedFamily = {
+            ...existingFamily,
+            city: newCity||existingFamily.city,
+            address: newAddress||existingFamily.address,
+            specialNeeds: newSN||existingFamily.specialNeeds,
+            socialCenter: newSC||existingFamily.socialCenter,
+            members: updatedMembers
+          };
+
+          const { error } = await supabase.from("families").update(toDB(updatedFamily)).eq("id", existingFamily.id);
+          if (error) { errors.push({ family:familyName, error:error.message }); continue; }
+          setFamilies(prev=>prev.map(f=>f.id===existingFamily.id?updatedFamily:f));
+          if (changes.length>0) updated.push({ family:familyName, changes });
+        }
+      } catch(e) {
+        errors.push({ family:familyName, error:e.message });
+      }
+    }
+
+    // Save log to Supabase
+    const summary = { created, updated, errors, total_rows:rows.length, filename:file.name };
+    await supabase.from("import_logs").insert({
+      imported_by: session.user.email,
+      summary,
+      filename: file.name
+    });
+
+    setReport(summary);
+    setImporting(false);
+  };
+
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(15,23,42,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
+      <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:680,maxHeight:"90vh",overflow:"auto",boxShadow:"0 25px 60px rgba(0,0,0,0.35)" }}>
+        <div style={{ padding:"20px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",background:"linear-gradient(135deg,#059669,#0d9488)",borderRadius:"16px 16px 0 0",position:"sticky",top:0,zIndex:10 }}>
+          <h2 style={{ margin:0,color:"#fff",fontSize:20 }}>📥 Импорт из CSV</h2>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",borderRadius:8,padding:"4px 12px",cursor:"pointer",fontSize:18 }}>✕</button>
+        </div>
+
+        <div style={{ padding:28,display:"flex",flexDirection:"column",gap:20 }}>
+          {!report ? <>
+            <div style={{ background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:16 }}>
+              <div style={{ fontWeight:700,fontSize:14,color:"#065f46",marginBottom:8 }}>Инструкция</div>
+              <div style={{ fontSize:13,color:"#374151",lineHeight:1.6 }}>
+                1. Скачайте шаблон CSV<br/>
+                2. Заполните данные (не удаляйте строку заголовка)<br/>
+                3. Сохраните файл и загрузите его ниже<br/>
+                4. Нажмите «Запустить импорт»
+              </div>
+            </div>
+
+            <button onClick={downloadTemplate} style={{ ...btnSecondary,alignSelf:"flex-start",color:"#059669",borderColor:"#6ee7b7",fontWeight:700 }}>
+              📄 Скачать шаблон CSV
+            </button>
+
+            <label style={{ display:"flex",flexDirection:"column",gap:8,border:"2px dashed #e2e8f0",borderRadius:12,padding:24,textAlign:"center",cursor:"pointer",background:"#f8fafc" }}>
+              <span style={{ fontSize:32 }}>📂</span>
+              <span style={{ fontSize:14,fontWeight:600,color:"#374151" }}>{file ? file.name : "Выберите CSV файл"}</span>
+              <span style={{ fontSize:12,color:"#94a3b8" }}>Нажмите чтобы выбрать файл</span>
+              <input type="file" accept=".csv" onChange={handleFile} style={{ display:"none" }} />
+            </label>
+
+            <button onClick={runImport} disabled={!file||importing}
+              style={{ ...btnPrimary,padding:"12px",fontSize:15,opacity:(!file||importing)?0.6:1 }}>
+              {importing ? "⏳ Импортируется..." : "🚀 Запустить импорт"}
+            </button>
+          </> : (
+            <ImportReport report={report} onClose={onClose} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Import Report ─────────────────────────────────────────────────────────
+function ImportReport({ report, onClose }) {
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10 }}>
+        <div style={{ background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:14,textAlign:"center" }}>
+          <div style={{ fontSize:28,fontWeight:800,color:"#059669" }}>{report.created.length}</div>
+          <div style={{ fontSize:12,color:"#065f46",fontWeight:600 }}>Новых семей</div>
+        </div>
+        <div style={{ background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:14,textAlign:"center" }}>
+          <div style={{ fontSize:28,fontWeight:800,color:"#2563eb" }}>{report.updated.length}</div>
+          <div style={{ fontSize:12,color:"#1e40af",fontWeight:600 }}>Обновлено</div>
+        </div>
+        <div style={{ background:report.errors.length>0?"#fef2f2":"#f8fafc",border:`1px solid ${report.errors.length>0?"#fecaca":"#e2e8f0"}`,borderRadius:10,padding:14,textAlign:"center" }}>
+          <div style={{ fontSize:28,fontWeight:800,color:report.errors.length>0?"#dc2626":"#94a3b8" }}>{report.errors.length}</div>
+          <div style={{ fontSize:12,color:report.errors.length>0?"#991b1b":"#64748b",fontWeight:600 }}>Ошибок</div>
+        </div>
+      </div>
+
+      {report.created.length>0 && (
+        <div>
+          <div style={{ fontWeight:700,fontSize:14,color:"#059669",marginBottom:8 }}>✅ Созданы новые записи</div>
+          {report.created.map((c,i)=>(
+            <div key={i} style={{ background:"#f0fdf4",borderRadius:8,padding:"8px 12px",marginBottom:6,fontSize:13 }}>
+              <span style={{ fontWeight:700 }}>🏠 {c.family}</span>
+              <span style={{ color:"#64748b" }}> — {c.members.join(", ")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {report.updated.length>0 && (
+        <div>
+          <div style={{ fontWeight:700,fontSize:14,color:"#2563eb",marginBottom:8 }}>🔄 Обновлены данные</div>
+          {report.updated.map((u,i)=>(
+            <div key={i} style={{ background:"#eff6ff",borderRadius:8,padding:"10px 12px",marginBottom:8,fontSize:13 }}>
+              <div style={{ fontWeight:700,marginBottom:6 }}>🏠 {u.family}</div>
+              {u.changes.map((ch,j)=>(
+                <div key={j} style={{ marginBottom:4 }}>
+                  <span style={{ fontWeight:600,color:"#374151" }}>👤 {ch.person}: </span>
+                  {ch.fields.map((f,k)=>(
+                    <span key={k} style={{ fontSize:12 }}>
+                      <span style={{ color:"#64748b" }}>{f.field}: </span>
+                      <span style={{ color:"#dc2626",textDecoration:"line-through" }}>{f.was}</span>
+                      <span style={{ color:"#64748b" }}> → </span>
+                      <span style={{ color:"#059669",fontWeight:600 }}>{f.became}</span>
+                      {k<ch.fields.length-1?", ":""}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {report.errors.length>0 && (
+        <div>
+          <div style={{ fontWeight:700,fontSize:14,color:"#dc2626",marginBottom:8 }}>❌ Ошибки</div>
+          {report.errors.map((e,i)=>(
+            <div key={i} style={{ background:"#fef2f2",borderRadius:8,padding:"8px 12px",marginBottom:6,fontSize:13,color:"#991b1b" }}>
+              <span style={{ fontWeight:700 }}>{e.family}: </span>{e.error}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ fontSize:12,color:"#94a3b8",borderTop:"1px solid #e2e8f0",paddingTop:12 }}>
+        Файл: {report.filename} · Строк обработано: {report.total_rows} · Отчёт сохранён в логах
+      </div>
+
+      <button onClick={onClose} style={{ ...btnPrimary,padding:"10px" }}>✓ Закрыть</button>
+    </div>
+  );
+}
+
+// ── Logs Modal ────────────────────────────────────────────────────────────
+function LogsModal({ onClose }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null);
+
+  useEffect(() => {
+    supabase.from("import_logs").select("*").order("imported_at",{ascending:false}).limit(50)
+      .then(({data})=>{ if(data) setLogs(data); setLoading(false); });
+  }, []);
+
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(15,23,42,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
+      <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:700,maxHeight:"90vh",overflow:"auto",boxShadow:"0 25px 60px rgba(0,0,0,0.35)" }}>
+        <div style={{ padding:"20px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",background:"linear-gradient(135deg,#374151,#1f2937)",borderRadius:"16px 16px 0 0",position:"sticky",top:0,zIndex:10 }}>
+          <h2 style={{ margin:0,color:"#fff",fontSize:20 }}>📋 Логи импорта</h2>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",borderRadius:8,padding:"4px 12px",cursor:"pointer",fontSize:18 }}>✕</button>
+        </div>
+        <div style={{ padding:24 }}>
+          {loading ? <div style={{ textAlign:"center",color:"#94a3b8",padding:40 }}>Загрузка...</div>
+            : logs.length===0 ? <div style={{ textAlign:"center",color:"#94a3b8",padding:40 }}>Логов пока нет</div>
+            : logs.map(log=>(
+              <div key={log.id} style={{ background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,marginBottom:10,overflow:"hidden" }}>
+                <div style={{ padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",background:expanded===log.id?"#f1f5f9":"#f8fafc" }}
+                  onClick={()=>setExpanded(expanded===log.id?null:log.id)}>
+                  <div>
+                    <div style={{ fontWeight:700,fontSize:14,color:"#1e293b" }}>{log.filename||"Без названия"}</div>
+                    <div style={{ fontSize:12,color:"#64748b",marginTop:2 }}>
+                      {new Date(log.imported_at).toLocaleString("ru-RU")} · {log.imported_by}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                    <span style={{ background:"#d1fae5",color:"#065f46",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>+{log.summary.created?.length||0}</span>
+                    <span style={{ background:"#dbeafe",color:"#1e40af",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>↻{log.summary.updated?.length||0}</span>
+                    {(log.summary.errors?.length||0)>0 && <span style={{ background:"#fee2e2",color:"#991b1b",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>✕{log.summary.errors.length}</span>}
+                    <span style={{ fontSize:14,color:"#94a3b8" }}>{expanded===log.id?"▲":"▼"}</span>
+                  </div>
+                </div>
+                {expanded===log.id && (
+                  <div style={{ padding:"0 16px 16px",borderTop:"1px solid #e2e8f0" }}>
+                    <ImportReport report={log.summary} onClose={()=>{}} />
+                  </div>
+                )}
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Excel Dropdown ────────────────────────────────────────────────────────
 function ExcelDropdown({ families, filtered, hasFilters }) {
   const [open, setOpen] = useState(false);
@@ -782,6 +1194,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [showPrograms, setShowPrograms] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all"); // all | specialNeeds | urgent | jcc | children
   const [viewMode, setViewMode] = useState("family"); // family | person
@@ -899,6 +1313,8 @@ export default function App() {
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
             {!isJCC && <ExcelDropdown families={families} filtered={filtered} hasFilters={hasFilters} />}
             {!isJCC && !isHesed && <button onClick={()=>setShowPrograms(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>🏛 Программы JCC</button>}
+            {!isJCC && <button onClick={()=>setShowImport(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>📥 Импорт</button>}
+            <button onClick={()=>setShowLogs(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>📋 Логи</button>
             <button onClick={()=>setModal("new")} style={{ ...btnPrimary,background:"rgba(255,255,255,0.2)",border:"1px solid rgba(255,255,255,0.4)" }}>➕ Новая семья</button>
             <button onClick={handleLogout} style={{ ...btnSecondary,background:"transparent",color:"#fff",borderColor:"rgba(255,255,255,0.3)" }}>🚪</button>
           </div>
@@ -956,6 +1372,10 @@ export default function App() {
 
       {/* Modals */}
       {modal && <FamilyModal family={modal==="new"?null:modal} onSave={saveFamily} onClose={()=>setModal(null)} allPrograms={allPrograms} isHesed={isHesed} />}
+
+      {showImport && <ImportModal onClose={()=>setShowImport(false)} allPrograms={allPrograms} families={families} setFamilies={setFamilies} session={session} />}
+
+      {showLogs && <LogsModal onClose={()=>setShowLogs(false)} />}
 
       {showPrograms && (
         <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.75)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
