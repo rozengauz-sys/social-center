@@ -1089,7 +1089,87 @@ function ImportReport({ report, onClose }) {
 }
 
 // ── Logs Modal ────────────────────────────────────────────────────────────
-function LogsModal({ onClose }) {
+const ACTION_LABELS = { create:"Создан", update:"Изменён", delete:"Удалён" };
+const ACTION_COLORS = { create:"#059669", update:"#2563eb", delete:"#dc2626" };
+const ACTION_BG = { create:"#d1fae5", update:"#dbeafe", delete:"#fee2e2" };
+const OBJECT_LABELS = { family:"Семья", member:"Участник", aid:"Помощь", visit:"Визит" };
+
+function ChangesTab() {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null);
+  const [filterAction, setFilterAction] = useState("all");
+
+  useEffect(() => {
+    supabase.from("change_logs").select("*").order("changed_at",{ascending:false}).limit(200)
+      .then(({data})=>{ if(data) setLogs(data); setLoading(false); });
+  }, []);
+
+  const filtered = filterAction==="all" ? logs : logs.filter(l=>l.action===filterAction);
+
+  if (loading) return <div style={{ textAlign:"center",color:"#94a3b8",padding:40 }}>Загрузка...</div>;
+  if (logs.length===0) return <div style={{ textAlign:"center",color:"#94a3b8",padding:40 }}>Изменений пока нет</div>;
+
+  return (
+    <div>
+      <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
+        {[["all","Все"],["create","Создание"],["update","Изменение"],["delete","Удаление"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setFilterAction(k)} style={{ padding:"4px 12px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:12,fontWeight:600,
+            background:filterAction===k?"#6366f1":"#fff",color:filterAction===k?"#fff":"#475569",borderColor:filterAction===k?"#6366f1":"#e2e8f0" }}>{l}</button>
+        ))}
+        <span style={{ fontSize:12,color:"#94a3b8",alignSelf:"center",marginLeft:4 }}>{filtered.length} записей</span>
+      </div>
+      {filtered.map(log=>(
+        <div key={log.id} style={{ background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,marginBottom:8,overflow:"hidden" }}>
+          <div style={{ padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}
+            onClick={()=>setExpanded(expanded===log.id?null:log.id)}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+              <span style={{ background:ACTION_BG[log.action],color:ACTION_COLORS[log.action],borderRadius:5,padding:"2px 8px",fontSize:11,fontWeight:700 }}>
+                {ACTION_LABELS[log.action]||log.action}
+              </span>
+              <span style={{ background:"#f3f4f6",color:"#374151",borderRadius:5,padding:"2px 8px",fontSize:11,fontWeight:600 }}>
+                {OBJECT_LABELS[log.object_type]||log.object_type}
+              </span>
+              <span style={{ fontWeight:700,fontSize:13,color:"#1e293b" }}>{log.family_name}</span>
+              {log.object_name && <span style={{ fontSize:12,color:"#6366f1",fontWeight:600 }}>→ {log.object_name}</span>}
+            </div>
+            <div style={{ display:"flex",alignItems:"center",gap:8,flexShrink:0 }}>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:11,color:"#64748b" }}>{new Date(log.changed_at).toLocaleString("ru-RU")}</div>
+                <div style={{ fontSize:11,color:"#94a3b8" }}>{log.changed_by}</div>
+              </div>
+              <span style={{ fontSize:14,color:"#94a3b8" }}>{expanded===log.id?"▲":"▼"}</span>
+            </div>
+          </div>
+          {expanded===log.id && (
+            <div style={{ padding:"0 14px 12px",borderTop:"1px solid #e2e8f0" }}>
+              {Array.isArray(log.changes) ? (
+                <div style={{ display:"flex",flexDirection:"column",gap:4,marginTop:8 }}>
+                  {log.changes.map((c,i)=>(
+                    <div key={i} style={{ fontSize:12,display:"flex",gap:6,flexWrap:"wrap",alignItems:"baseline" }}>
+                      <span style={{ fontWeight:700,color:"#374151",minWidth:120 }}>{c.field}:</span>
+                      {c.was && <><span style={{ color:"#dc2626",textDecoration:"line-through" }}>{String(c.was)}</span>
+                      <span style={{ color:"#94a3b8" }}>→</span></>}
+                      <span style={{ color:"#059669",fontWeight:600 }}>{String(c.became)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : log.changes?.snapshot ? (
+                <div style={{ marginTop:8,fontSize:12,color:"#475569" }}>
+                  {Object.entries(log.changes.snapshot).map(([k,v])=>(
+                    <div key={k}><span style={{ fontWeight:600 }}>{k}:</span> {Array.isArray(v)?v.join(", "):String(v)}</div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ImportTab() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null);
@@ -1099,41 +1179,60 @@ function LogsModal({ onClose }) {
       .then(({data})=>{ if(data) setLogs(data); setLoading(false); });
   }, []);
 
+  if (loading) return <div style={{ textAlign:"center",color:"#94a3b8",padding:40 }}>Загрузка...</div>;
+  if (logs.length===0) return <div style={{ textAlign:"center",color:"#94a3b8",padding:40 }}>Импортов пока не было</div>;
+
+  return (
+    <div>
+      {logs.map(log=>(
+        <div key={log.id} style={{ background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,marginBottom:10,overflow:"hidden" }}>
+          <div style={{ padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}
+            onClick={()=>setExpanded(expanded===log.id?null:log.id)}>
+            <div>
+              <div style={{ fontWeight:700,fontSize:14,color:"#1e293b" }}>{log.filename||"Без названия"}</div>
+              <div style={{ fontSize:12,color:"#64748b",marginTop:2 }}>{new Date(log.imported_at).toLocaleString("ru-RU")} · {log.imported_by}</div>
+            </div>
+            <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+              <span style={{ background:"#d1fae5",color:"#065f46",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>+{log.summary.created?.length||0}</span>
+              <span style={{ background:"#dbeafe",color:"#1e40af",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>↻{log.summary.updated?.length||0}</span>
+              {(log.summary.errors?.length||0)>0 && <span style={{ background:"#fee2e2",color:"#991b1b",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>✕{log.summary.errors.length}</span>}
+              <span style={{ fontSize:14,color:"#94a3b8" }}>{expanded===log.id?"▲":"▼"}</span>
+            </div>
+          </div>
+          {expanded===log.id && (
+            <div style={{ padding:"0 16px 16px",borderTop:"1px solid #e2e8f0" }}>
+              <ImportReport report={log.summary} onClose={()=>{}} />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LogsModal({ onClose }) {
+  const [tab, setTab] = useState("changes");
   return (
     <div style={{ position:"fixed",inset:0,background:"rgba(15,23,42,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
-      <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:700,maxHeight:"90vh",overflow:"auto",boxShadow:"0 25px 60px rgba(0,0,0,0.35)" }}>
+      <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:720,maxHeight:"92vh",overflow:"auto",boxShadow:"0 25px 60px rgba(0,0,0,0.35)" }}>
         <div style={{ padding:"20px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",background:"linear-gradient(135deg,#374151,#1f2937)",borderRadius:"16px 16px 0 0",position:"sticky",top:0,zIndex:10 }}>
-          <h2 style={{ margin:0,color:"#fff",fontSize:20 }}>📋 Логи импорта</h2>
+          <h2 style={{ margin:0,color:"#fff",fontSize:20 }}>📋 Логи</h2>
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",borderRadius:8,padding:"4px 12px",cursor:"pointer",fontSize:18 }}>✕</button>
         </div>
-        <div style={{ padding:24 }}>
-          {loading ? <div style={{ textAlign:"center",color:"#94a3b8",padding:40 }}>Загрузка...</div>
-            : logs.length===0 ? <div style={{ textAlign:"center",color:"#94a3b8",padding:40 }}>Логов пока нет</div>
-            : logs.map(log=>(
-              <div key={log.id} style={{ background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,marginBottom:10,overflow:"hidden" }}>
-                <div style={{ padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",background:expanded===log.id?"#f1f5f9":"#f8fafc" }}
-                  onClick={()=>setExpanded(expanded===log.id?null:log.id)}>
-                  <div>
-                    <div style={{ fontWeight:700,fontSize:14,color:"#1e293b" }}>{log.filename||"Без названия"}</div>
-                    <div style={{ fontSize:12,color:"#64748b",marginTop:2 }}>
-                      {new Date(log.imported_at).toLocaleString("ru-RU")} · {log.imported_by}
-                    </div>
-                  </div>
-                  <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                    <span style={{ background:"#d1fae5",color:"#065f46",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>+{log.summary.created?.length||0}</span>
-                    <span style={{ background:"#dbeafe",color:"#1e40af",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>↻{log.summary.updated?.length||0}</span>
-                    {(log.summary.errors?.length||0)>0 && <span style={{ background:"#fee2e2",color:"#991b1b",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>✕{log.summary.errors.length}</span>}
-                    <span style={{ fontSize:14,color:"#94a3b8" }}>{expanded===log.id?"▲":"▼"}</span>
-                  </div>
-                </div>
-                {expanded===log.id && (
-                  <div style={{ padding:"0 16px 16px",borderTop:"1px solid #e2e8f0" }}>
-                    <ImportReport report={log.summary} onClose={()=>{}} />
-                  </div>
-                )}
-              </div>
-            ))
-          }
+        <div style={{ padding:"16px 24px 0" }}>
+          <div style={{ display:"flex", gap:8, borderBottom:"2px solid #e2e8f0", marginBottom:16 }}>
+            {[["changes","🔄 Изменения в базе"],["import","📥 Импорт"]].map(([k,l])=>(
+              <button key={k} onClick={()=>setTab(k)} style={{
+                padding:"8px 16px",background:"none",border:"none",cursor:"pointer",fontWeight:700,fontSize:13,
+                color:tab===k?"#6366f1":"#94a3b8",
+                borderBottom:tab===k?"2px solid #6366f1":"2px solid transparent",
+                marginBottom:-2
+              }}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ padding:"0 24px 24px" }}>
+          {tab==="changes" ? <ChangesTab /> : <ImportTab />}
         </div>
       </div>
     </div>
@@ -1146,7 +1245,7 @@ function ExcelDropdown({ families, filtered, hasFilters }) {
   return (
     <div style={{ position:"relative" }}>
       <button onClick={()=>setOpen(o=>!o)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13,display:"flex",alignItems:"center",gap:6 }}>
-        📊 CSV ▾
+        📤 Экспорт ▾
       </button>
       {open && (
         <div style={{ position:"absolute", top:"calc(100% + 6px)", right:0, background:"#fff", borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.15)", border:"1px solid #e2e8f0", zIndex:50, minWidth:200, overflow:"hidden" }}
@@ -1263,25 +1362,149 @@ export default function App() {
     return persons.sort((a,b)=>`${a.member.lastName}${a.member.firstName}`.localeCompare(`${b.member.lastName}${b.member.firstName}`));
   }, [filtered, filter]);
 
+  // ── Change logging helper ──────────────────────────────────────────────
+  const logChange = async (action, objectType, familyName, objectName, changes) => {
+    try {
+      await supabase.from("change_logs").insert({
+        changed_by: session.user.email,
+        action,
+        object_type: objectType,
+        family_name: familyName,
+        object_name: objectName || "",
+        changes
+      });
+    } catch(e) { console.error("Log error:", e); }
+  };
+
+  // ── Diff helpers ───────────────────────────────────────────────────────
+  const diffFields = (oldObj, newObj, fields) => {
+    const changes = [];
+    fields.forEach(([key, label]) => {
+      const oldVal = String(oldObj[key]??"-");
+      const newVal = String(newObj[key]??"-");
+      if (oldVal !== newVal) changes.push({ field:label, was:oldVal, became:newVal });
+    });
+    return changes;
+  };
+
+  const diffMembers = async (oldMembers, newMembers, familyName) => {
+    const MEMBER_FIELDS = [
+      ["lastName","Фамилия"],["firstName","Имя"],["dob","Дата рождения"],
+      ["relation","Степень родства"],["misCode","Код MIS"],["phone","Телефон"],
+      ["email","Email"],["isMadrich","Мадрих"],["isVolunteer","Волонтёр"]
+    ];
+    for (const nm of newMembers) {
+      const om = oldMembers.find(m=>m.id===nm.id);
+      if (!om) {
+        await logChange("create","member",familyName,`${nm.lastName} ${nm.firstName}`,[{field:"Статус",was:"",became:"Новый член семьи добавлен"}]);
+      } else {
+        const changes = diffFields(om, nm, MEMBER_FIELDS);
+        // JCC diff
+        const oldJCC = om.jcc?.active?"Да":"Нет";
+        const newJCC = nm.jcc?.active?"Да":"Нет";
+        if (oldJCC!==newJCC) changes.push({field:"JCC",was:oldJCC,became:newJCC});
+        if (nm.jcc?.active) {
+          const oldP = (om.jcc?.programs||[]).map(p=>p.name).sort().join(", ");
+          const newP = (nm.jcc?.programs||[]).map(p=>p.name).sort().join(", ");
+          if (oldP!==newP) changes.push({field:"Программы JCC",was:oldP||"-",became:newP||"-"});
+          // notes diff per program
+          (nm.jcc.programs||[]).forEach(np=>{
+            const op = (om.jcc?.programs||[]).find(p=>p.id===np.id);
+            if (op && op.notes!==np.notes) changes.push({field:`Заметки JCC (${np.name})`,was:op.notes||"-",became:np.notes||"-"});
+          });
+        }
+        if (changes.length>0) await logChange("update","member",familyName,`${nm.lastName} ${nm.firstName}`,changes);
+      }
+    }
+    for (const om of oldMembers) {
+      if (!newMembers.find(m=>m.id===om.id)) {
+        await logChange("delete","member",familyName,`${om.lastName} ${om.firstName}`,[{field:"Статус",was:"Член семьи",became:"Удалён"}]);
+      }
+    }
+  };
+
+  const diffAid = async (oldAid, newAid, familyName) => {
+    const MONTHS_RU = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+    for (const na of newAid) {
+      const oa = oldAid.find(a=>a.id===na.id);
+      const label = `${MONTHS_RU[na.month]} ${na.year}`;
+      if (!oa) await logChange("create","aid",familyName,label,[{field:"Сумма помощи",was:"",became:`€${parseFloat(na.amount).toFixed(2)}`}]);
+      else if (String(oa.amount)!==String(na.amount)) await logChange("update","aid",familyName,label,[{field:"Сумма",was:`€${parseFloat(oa.amount).toFixed(2)}`,became:`€${parseFloat(na.amount).toFixed(2)}`}]);
+    }
+    for (const oa of oldAid) {
+      if (!newAid.find(a=>a.id===oa.id)) {
+        const MONTHS_RU2=["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+        await logChange("delete","aid",familyName,`${MONTHS_RU2[oa.month]} ${oa.year}`,[{field:"Сумма помощи",was:`€${parseFloat(oa.amount).toFixed(2)}`,became:"Удалено"}]);
+      }
+    }
+  };
+
+  const diffVisits = async (oldVisits, newVisits, familyName) => {
+    for (const nv of newVisits) {
+      const ov = oldVisits.find(v=>v.id===nv.id);
+      if (!ov) await logChange("create","visit",familyName,formatDate(nv.date),[{field:"Визит",was:"",became:`${formatDate(nv.date)}${nv.worker?" — "+nv.worker:""}`}]);
+      else {
+        const changes = [];
+        if (ov.date!==nv.date) changes.push({field:"Дата",was:formatDate(ov.date),became:formatDate(nv.date)});
+        if (ov.worker!==nv.worker) changes.push({field:"Сотрудник",was:ov.worker||"-",became:nv.worker||"-"});
+        if (ov.notes!==nv.notes) changes.push({field:"Заметки",was:ov.notes||"-",became:nv.notes||"-"});
+        if (changes.length>0) await logChange("update","visit",familyName,formatDate(nv.date),changes);
+      }
+    }
+    for (const ov of oldVisits) {
+      if (!newVisits.find(v=>v.id===ov.id)) await logChange("delete","visit",familyName,formatDate(ov.date),[{field:"Визит",was:formatDate(ov.date),became:"Удалён"}]);
+    }
+  };
+
   const saveFamily = async (form) => {
     const row = toDB(form);
     const isNew = form.id==="new"||!families.find(f=>f.id===form.id);
     if (isNew) {
       const {data,error} = await supabase.from("families").insert(row).select();
       if (error) { alert("Ошибка: "+error.message); return; }
-      setFamilies(prev=>[...prev,fromDB(data[0])]);
+      const saved = fromDB(data[0]);
+      setFamilies(prev=>[...prev, saved]);
+      // Log: new family + all members
+      await logChange("create","family",form.familyName,"",{snapshot:{
+        familyName:form.familyName, city:form.city, address:form.address,
+        specialNeeds:form.specialNeeds, socialCenter:form.socialCenter,
+        members:(form.members||[]).map(m=>`${m.lastName} ${m.firstName}`)
+      }});
     } else {
+      const old = families.find(f=>f.id===form.id);
       const {error} = await supabase.from("families").update(row).eq("id",form.id);
       if (error) { alert("Ошибка: "+error.message); return; }
       setFamilies(prev=>prev.map(f=>f.id===form.id?{...fromDB({...row,id:form.id}),id:form.id}:f));
+      // Log family-level field changes
+      if (old) {
+        const FAM_FIELDS = [
+          ["familyName","Название семьи"],["city","Город"],["address","Адрес"],
+          ["comment","Комментарий"],["nextVisit","Дата визита"],
+          ["specialNeeds","Special Needs"],["socialCenter","Соц. центр"]
+        ];
+        const famChanges = diffFields(old, form, FAM_FIELDS);
+        if (famChanges.length>0) await logChange("update","family",form.familyName,"",famChanges);
+        // Log member changes
+        await diffMembers(old.members||[], form.members||[], form.familyName);
+        // Log aid changes
+        await diffAid(old.aid||[], form.aid||[], form.familyName);
+        // Log visit changes
+        await diffVisits(old.visits||[], form.visits||[], form.familyName);
+      }
     }
     setModal(null);
   };
 
   const deleteFamily = async (id) => {
+    const family = families.find(f=>f.id===id);
     const {error} = await supabase.from("families").delete().eq("id",id);
     if (error) { alert("Ошибка: "+error.message); return; }
     setFamilies(prev=>prev.filter(f=>f.id!==id));
+    if (family) await logChange("delete","family",family.familyName,"",{snapshot:{
+      familyName:family.familyName, city:family.city, address:family.address,
+      members:(family.members||[]).map(m=>`${m.lastName} ${m.firstName}`),
+      totalAid:(family.aid||[]).reduce((s,a)=>s+(parseFloat(a.amount)||0),0)
+    }});
   };
 
   const handleLogout = async () => { await supabase.auth.signOut(); setSession(null); setFamilies([]); };
@@ -1312,8 +1535,8 @@ export default function App() {
           </div>
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
             {!isJCC && <ExcelDropdown families={families} filtered={filtered} hasFilters={hasFilters} />}
-            {!isJCC && !isHesed && <button onClick={()=>setShowPrograms(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>🏛 Программы JCC</button>}
             {!isJCC && <button onClick={()=>setShowImport(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>📥 Импорт</button>}
+            {!isJCC && !isHesed && <button onClick={()=>setShowPrograms(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>🏛 Программы JCC</button>}
             <button onClick={()=>setShowLogs(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>📋 Логи</button>
             <button onClick={()=>setModal("new")} style={{ ...btnPrimary,background:"rgba(255,255,255,0.2)",border:"1px solid rgba(255,255,255,0.4)" }}>➕ Новая семья</button>
             <button onClick={handleLogout} style={{ ...btnSecondary,background:"transparent",color:"#fff",borderColor:"rgba(255,255,255,0.3)" }}>🚪</button>
