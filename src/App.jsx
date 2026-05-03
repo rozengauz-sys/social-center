@@ -229,7 +229,7 @@ function MembersEditor({ members, onChange, allPrograms, isHesed }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       {members.map((m,idx) => (
-        <div key={m.id} style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:12, padding:14 }}>
+        <div key={m.id} id={`member-edit-${m.id}`} style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:12, padding:14 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
             <span style={{ fontWeight:700, fontSize:13, color:"#6366f1" }}>
               👤 Член семьи #{idx+1}
@@ -488,22 +488,51 @@ const emptyFamily = () => ({
   aid:[], visits:[], members:[emptyMember()], jccPrograms:[]
 });
 
-function FamilyModal({ family, onSave, onClose, allPrograms, isHesed }) {
+function FamilyModal({ family, onSave, onClose, allPrograms, isHesed, singlePerson=false, scrollToMemberId=null }) {
   const [form, setForm] = useState(family ? {...family} : emptyFamily());
   const [saving, setSaving] = useState(false);
   const set = (f,v) => setForm(x=>({...x,[f]:v}));
+  const memberRefs = {};
+
+  // If singlePerson mode — prefill family name from first member when they type
+  useEffect(() => {
+    if (singlePerson && form.members.length===1) {
+      const m = form.members[0];
+      if (m.lastName||m.firstName) {
+        const name = [m.lastName,m.firstName].filter(Boolean).join(" ");
+        set("familyName", name);
+      }
+    }
+  }, [form.members[0]?.lastName, form.members[0]?.firstName]);
+
+  // Scroll to member after mount
+  useEffect(() => {
+    if (scrollToMemberId) {
+      setTimeout(()=>{
+        const el = document.getElementById(`member-edit-${scrollToMemberId}`);
+        if (el) el.scrollIntoView({ behavior:"smooth", block:"center" });
+      }, 300);
+    }
+  }, [scrollToMemberId]);
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.75)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
       <div style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:720, maxHeight:"93vh", overflow:"auto", boxShadow:"0 25px 60px rgba(0,0,0,0.35)" }}>
         <div style={{ padding:"20px 28px", display:"flex", justifyContent:"space-between", alignItems:"center", background:"linear-gradient(135deg,#6366f1,#8b5cf6)", borderRadius:"16px 16px 0 0", position:"sticky", top:0, zIndex:10 }}>
-          <h2 style={{ margin:0, color:"#fff", fontSize:20 }}>{family?"✏️ Редактировать":"➕ Новая семья"}</h2>
+          <h2 style={{ margin:0, color:"#fff", fontSize:20 }}>
+            {family ? "✏️ Редактировать" : singlePerson ? "👤 Новый участник" : "➕ Новая семья"}
+          </h2>
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", color:"#fff", borderRadius:8, padding:"4px 12px", cursor:"pointer", fontSize:18 }}>✕</button>
         </div>
         <div style={{ padding:28, display:"flex", flexDirection:"column", gap:20 }}>
-          <label style={labelStyle}>Название семьи *
-            <input style={inputStyle} value={form.familyName} onChange={e=>set("familyName",e.target.value)} placeholder="Семья Соколовых" />
-          </label>
+          {singlePerson
+            ? <div style={{ background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#0369a1" }}>
+                👤 Название записи будет создано автоматически по имени участника
+              </div>
+            : <label style={labelStyle}>Название семьи *
+                <input style={inputStyle} value={form.familyName} onChange={e=>set("familyName",e.target.value)} placeholder="Семья Соколовых" />
+              </label>
+          }
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
             <label style={labelStyle}>Город<input style={inputStyle} value={form.city} onChange={e=>set("city",e.target.value)} placeholder="Тель-Авив" /></label>
             <label style={labelStyle}>Адрес<input style={inputStyle} value={form.address} onChange={e=>set("address",e.target.value)} placeholder="ул. Герцля, 5" /></label>
@@ -661,8 +690,9 @@ function FamilyCard({ family, onEdit, onDelete, isJCC, isHesed }) {
 }
 
 // ── Person Card (individual view) ─────────────────────────────────────────
-function PersonCard({ member, family, isJCC }) {
+function PersonCard({ member, family, isJCC, onEdit }) {
   const [expanded, setExpanded] = useState(false);
+  const [expandedRelative, setExpandedRelative] = useState(null);
   const age = calcAge(member.dob);
   const familyMembers = (family.members||[]).filter(m=>m.id!==member.id);
 
@@ -698,15 +728,52 @@ function PersonCard({ member, family, isJCC }) {
             {family.address && <div style={{ background:"#f8fafc",borderRadius:7,padding:"7px 10px" }}><div style={{ fontSize:10,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Адрес</div><div style={{ fontSize:13,fontWeight:600 }}>{family.address}</div></div>}
           </div>
 
+          {/* Relatives — expandable */}
           {familyMembers.length>0 && (
             <div>
               <div style={{ fontSize:12,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Члены семьи</div>
-              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                {familyMembers.map(r=>(
-                  <span key={r.id} style={{ background:"#ede9fe",color:"#5b21b6",border:"1px solid #a78bfa",borderRadius:16,padding:"3px 10px",fontSize:12,fontWeight:600 }}>
-                    {r.lastName} {r.firstName}{r.relation?` (${r.relation})`:""}
-                  </span>
-                ))}
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {familyMembers.map(r=>{
+                  const rAge = calcAge(r.dob);
+                  const isExpR = expandedRelative===r.id;
+                  return (
+                    <div key={r.id} style={{ borderRadius:9, border:"1px solid #e2e8f0", overflow:"hidden" }}>
+                      <div onClick={()=>setExpandedRelative(isExpR?null:r.id)}
+                        style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",cursor:"pointer",background:isExpR?"#ede9fe":"#f8fafc" }}>
+                        <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                          <span style={{ fontWeight:700,fontSize:13,color:"#5b21b6" }}>{r.lastName} {r.firstName}</span>
+                          {r.relation && <span style={{ fontSize:12,color:"#6366f1" }}>({r.relation})</span>}
+                          {isMinor(r.dob) && <span style={{ background:"#fef9c3",color:"#713f12",border:"1px solid #fde047",borderRadius:4,padding:"1px 5px",fontSize:10,fontWeight:700 }}>👶</span>}
+                          {r.jcc?.active && <span style={{ background:"#e0f2fe",color:"#0369a1",border:"1px solid #7dd3fc",borderRadius:4,padding:"1px 5px",fontSize:10,fontWeight:700 }}>🏛</span>}
+                          {r.isMadrich && <span style={{ background:"#ede9fe",color:"#6d28d9",border:"1px solid #c4b5fd",borderRadius:4,padding:"1px 5px",fontSize:10,fontWeight:700 }}>🎓</span>}
+                          {r.isVolunteer && <span style={{ background:"#cffafe",color:"#0e7490",border:"1px solid #67e8f9",borderRadius:4,padding:"1px 5px",fontSize:10,fontWeight:700 }}>🤝</span>}
+                        </div>
+                        <span style={{ fontSize:13,color:"#94a3b8" }}>{isExpR?"▲":"▼"}</span>
+                      </div>
+                      {isExpR && (
+                        <div style={{ padding:"10px 12px",borderTop:"1px solid #e2e8f0",background:"#faf5ff",display:"flex",flexDirection:"column",gap:6 }}>
+                          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6 }}>
+                            {r.dob && <div style={{ background:"#fff",borderRadius:6,padding:"6px 9px" }}><div style={{ fontSize:9,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Дата рождения</div><div style={{ fontSize:12,fontWeight:600 }}>{formatDate(r.dob)}{rAge!==null?` (${rAge} лет)`:""}</div></div>}
+                            {r.misCode && <div style={{ background:"#fff",borderRadius:6,padding:"6px 9px" }}><div style={{ fontSize:9,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Код MIS</div><div style={{ fontSize:12,fontWeight:600 }}>{r.misCode}</div></div>}
+                            {r.phone && <div style={{ background:"#fff",borderRadius:6,padding:"6px 9px" }}><div style={{ fontSize:9,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Телефон</div><div style={{ fontSize:12,fontWeight:600 }}>{r.phone}</div></div>}
+                            {r.email && <div style={{ background:"#fff",borderRadius:6,padding:"6px 9px",gridColumn:"1/-1" }}><div style={{ fontSize:9,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Email</div><div style={{ fontSize:12,fontWeight:600 }}>{r.email}</div></div>}
+                          </div>
+                          {r.jcc?.active && (r.jcc.programs||[]).length>0 && (
+                            <div>
+                              <div style={{ fontSize:10,fontWeight:700,color:"#0284c7",textTransform:"uppercase",marginBottom:4 }}>Программы JCC</div>
+                              {r.jcc.programs.map(p=>(
+                                <div key={p.id} style={{ background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:5,padding:"5px 8px",marginBottom:3,fontSize:12 }}>
+                                  <span style={{ fontWeight:700,color:"#0369a1" }}>{p.name}</span>
+                                  {p.notes && <span style={{ color:"#475569" }}> — {p.notes}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -722,6 +789,11 @@ function PersonCard({ member, family, isJCC }) {
               ))}
             </div>
           )}
+
+          {/* Edit button */}
+          <div style={{ display:"flex", justifyContent:"flex-end", marginTop:4 }}>
+            <button onClick={()=>onEdit(family, member.id)} style={btnSecondary}>✏️ Редактировать</button>
+          </div>
         </div>
       )}
     </div>
@@ -1340,7 +1412,8 @@ export default function App() {
   const [families, setFamilies] = useState([]);
   const [allPrograms, setAllPrograms] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(null);
+  const [modal, setModal] = useState(null); // null | "new" | "newPerson" | family object
+  const [personModal, setPersonModal] = useState(null); // { family, scrollToMemberId }
   const [showPrograms, setShowPrograms] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -1597,6 +1670,7 @@ export default function App() {
             {!isJCC && !isHesed && <button onClick={()=>setShowPrograms(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>🏛 Программы JCC</button>}
             <button onClick={()=>setShowLogs(true)} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.3)",fontSize:13 }}>📋 Логи</button>
             <button onClick={()=>setModal("new")} style={{ ...btnPrimary,background:"rgba(255,255,255,0.2)",border:"1px solid rgba(255,255,255,0.4)" }}>➕ Новая семья</button>
+            <button onClick={()=>setModal("newPerson")} style={{ ...btnSecondary,background:"rgba(255,255,255,0.15)",color:"#fff",borderColor:"rgba(255,255,255,0.4)",fontSize:13 }}>👤 Новый участник</button>
             <button onClick={handleLogout} style={{ ...btnSecondary,background:"transparent",color:"#fff",borderColor:"rgba(255,255,255,0.3)" }}>🚪</button>
           </div>
         </div>
@@ -1604,7 +1678,7 @@ export default function App() {
 
       <div style={{ maxWidth:940, margin:"0 auto", padding:"20px 16px" }}>
         {/* View mode toggle */}
-        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        <div style={{ display:"flex", gap:8, marginBottom:14, alignItems:"center" }}>
           {["family","person"].map(m=>(
             <button key={m} onClick={()=>setViewMode(m)} style={{
               padding:"7px 16px", borderRadius:8, border:"1px solid", cursor:"pointer", fontWeight:700, fontSize:13,
@@ -1646,13 +1720,34 @@ export default function App() {
             {filtered.map(f=><FamilyCard key={f.id} family={f} onEdit={setModal} onDelete={deleteFamily} isJCC={isJCC} isHesed={isHesed} />)}
           </> : <>
             {allPersons.length===0 && <EmptyState hasFilters={hasFilters} onReset={resetFilters} />}
-            {allPersons.map(({member,family})=><PersonCard key={`${family.id}-${member.id}`} member={member} family={family} isJCC={isJCC} />)}
+            {allPersons.map(({member,family})=><PersonCard key={`${family.id}-${member.id}`} member={member} family={family} isJCC={isJCC}
+              onEdit={(fam, memberId)=>setPersonModal({family:fam, scrollToMemberId:memberId})} />)}
           </>}
         </div>
       </div>
 
       {/* Modals */}
-      {modal && <FamilyModal family={modal==="new"?null:modal} onSave={saveFamily} onClose={()=>setModal(null)} allPrograms={allPrograms} isHesed={isHesed} />}
+      {(modal==="new"||modal==="newPerson"||(modal&&modal!=="new"&&modal!=="newPerson")) && (
+        <FamilyModal
+          family={modal==="new"||modal==="newPerson"?null:modal}
+          onSave={saveFamily}
+          onClose={()=>setModal(null)}
+          allPrograms={allPrograms}
+          isHesed={isHesed}
+          singlePerson={modal==="newPerson"}
+        />
+      )}
+
+      {personModal && (
+        <FamilyModal
+          family={personModal.family}
+          onSave={async(form)=>{ await saveFamily(form); setPersonModal(null); }}
+          onClose={()=>setPersonModal(null)}
+          allPrograms={allPrograms}
+          isHesed={isHesed}
+          scrollToMemberId={personModal.scrollToMemberId}
+        />
+      )}
 
       {showImport && <ImportModal onClose={()=>setShowImport(false)} allPrograms={allPrograms} families={families} setFamilies={setFamilies} session={session} />}
 
