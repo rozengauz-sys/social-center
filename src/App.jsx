@@ -1403,6 +1403,48 @@ const FAMILY_COMPARE_FIELDS = [
   ["comment","Комментарий"], ["nextVisit","Дата визита"],
 ];
 
+// ── Cross-script duplicate detection (кириллица vs латиница) ────────────────
+// Catches the case where the same person/family was imported twice — once with
+// a Russian-letter name, once with a Latin-letter (transliterated) name.
+const CYR_TO_LAT = {
+  'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'e','ж':'zh','з':'z','и':'i','й':'i',
+  'к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f',
+  'х':'h','ц':'c','ч':'ch','ш':'sh','щ':'sch','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya',
+};
+const LAT_DIACRITICS = {
+  'ā':'a','č':'c','ē':'e','ģ':'g','ī':'i','ķ':'k','ļ':'l','ņ':'n','š':'s','ū':'u','ž':'z',
+  'á':'a','é':'e','í':'i','ó':'o','ú':'u','ü':'u','ñ':'n','ô':'o','ï':'i','ë':'e','à':'a','ö':'o',
+};
+const hasCyrillic = (s) => /[Ѐ-ӿ]/.test(s||"");
+function transliterate(s) {
+  return (s||"").toLowerCase().split('').map(ch => CYR_TO_LAT[ch] ?? ch).join('');
+}
+function canonicalizeName(s) {
+  let x = (s||"").toLowerCase().split('').map(ch => LAT_DIACRITICS[ch] ?? ch).join('');
+  x = x.replace(/shch|sch/g,'sc').replace(/kh/g,'h').replace(/ts/g,'c').replace(/zh/g,'z').replace(/[^a-z]/g,'');
+  return x;
+}
+function nameToCanonicalLatin(s) {
+  return canonicalizeName(hasCyrillic(s) ? transliterate(s) : (s||""));
+}
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (m===0) return n; if (n===0) return m;
+  const dp = [];
+  for (let i=0;i<=m;i++) dp.push([i]);
+  for (let j=1;j<=n;j++) dp[0][j]=j;
+  for (let i=1;i<=m;i++) for (let j=1;j<=n;j++) {
+    dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1+Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  }
+  return dp[m][n];
+}
+function namesAreClose(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const maxLen = Math.max(a.length, b.length);
+  return levenshtein(a, b) <= Math.max(1, Math.round(maxLen * 0.25));
+}
+
 function useHealthFindings(families, allPrograms) {
   return useMemo(() => {
     const dupPeopleMap = {}, dupMisMap = {}, dupFamilyMap = {};
@@ -1451,10 +1493,65 @@ function useHealthFindings(families, allPrograms) {
       });
     });
 
-    const dupPeople = Object.values(dupPeopleMap).filter(g=>g.length>1);
+    const dupPeople = Object.values(dupPeopleMap).filter(g=>g.length>1).map(group=>({ group, crossScript:false }));
     const dupMis = Object.values(dupMisMap).filter(g=>g.length>1);
-    const dupFamilies = Object.values(dupFamilyMap).filter(g=>g.length>1);
-    return { dupPeople, dupMis, dupFamilies, broken };
+    const dupFamilies = Object.values(dupFamilyMap).filter(g=>g.length>1).map(group=>({ group, crossScript:false }));
+
+    // Cross-script pass: same person/family recorded once in Cyrillic, once in Latin letters.
+    const allEntries = [];
+    families.forEach(f => (f.members||[]).forEach(m => {
+      if (!m.lastName?.trim() || !m.firstName?.trim()) return;
+      allEntries.push({
+        family: f, member: m,
+        canLast: nameToCanonicalLatin(m.lastName), canFirst: nameToCanonicalLatin(m.firstName),
+        isCyr: hasCyrillic(m.lastName) || hasCyrillic(m.firstName),
+      });
+    }));
+    const seenPersonPairs = new Set();
+    const crossScriptPeople = [];
+    const tryPersonBucket = (bucket) => {
+      if (bucket.length < 2) return;
+      for (let i=0; i<bucket.length; i++) for (let j=i+1; j<bucket.length; j++) {
+        const a = bucket[i], b = bucket[j];
+        if (a.isCyr === b.isCyr || a.member.id === b.member.id) continue;
+        if (!namesAreClose(a.canLast, b.canLast) || !namesAreClose(a.canFirst, b.canFirst)) continue;
+        const key = [a.member.id, b.member.id].sort().join('|');
+        if (seenPersonPairs.has(key)) continue;
+        seenPersonPairs.add(key);
+        crossScriptPeople.push({ group: [{family:a.family, member:a.member}, {family:b.family, member:b.member}], crossScript:true });
+      }
+    };
+    const byDob = {};
+    allEntries.forEach(e => { if (e.member.dob) (byDob[e.member.dob] ||= []).push(e); });
+    Object.values(byDob).forEach(tryPersonBucket);
+    const byContact = {};
+    allEntries.forEach(e => {
+      const c = normKey(e.member.phone) || normKey(e.member.email);
+      if (c) (byContact[c] ||= []).push(e);
+    });
+    Object.values(byContact).forEach(tryPersonBucket);
+
+    // Cross-script pass for family names
+    const famEntries = families.filter(f=>f.familyName?.trim()).map(f => ({
+      family: f, canName: nameToCanonicalLatin(f.familyName), isCyr: hasCyrillic(f.familyName),
+    }));
+    const seenFamPairs = new Set();
+    const crossScriptFamilies = [];
+    for (let i=0; i<famEntries.length; i++) for (let j=i+1; j<famEntries.length; j++) {
+      const a = famEntries[i], b = famEntries[j];
+      if (a.isCyr === b.isCyr || !namesAreClose(a.canName, b.canName)) continue;
+      const key = [a.family.id, b.family.id].sort().join('|');
+      if (seenFamPairs.has(key)) continue;
+      seenFamPairs.add(key);
+      crossScriptFamilies.push({ group: [a.family, b.family], crossScript:true });
+    }
+
+    return {
+      dupPeople: [...dupPeople, ...crossScriptPeople],
+      dupMis,
+      dupFamilies: [...dupFamilies, ...crossScriptFamilies],
+      broken,
+    };
   }, [families, allPrograms]);
 }
 
@@ -1541,7 +1638,7 @@ function DuplicatePeopleCard({ group, onMerge, onEdit, onDelete, badge }) {
   );
 }
 
-function DuplicateFamilyCard({ group, onMerge, onEdit, onDelete }) {
+function DuplicateFamilyCard({ group, onMerge, onEdit, onDelete, badge }) {
   const [bIdx, setBIdx] = useState(1);
   const [busy, setBusy] = useState(false);
   const [choice, setChoice] = useState({});
@@ -1565,7 +1662,7 @@ function DuplicateFamilyCard({ group, onMerge, onEdit, onDelete }) {
   return (
     <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:12, padding:16, marginBottom:12 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, flexWrap:"wrap", gap:8 }}>
-        <div style={{ fontWeight:700, fontSize:13, color:"#92400e" }}>Похожие семьи — {group.length} шт.</div>
+        <div style={{ fontWeight:700, fontSize:13, color:"#92400e" }}>{badge||"Похожие семьи"} — {group.length} шт.</div>
         {group.length>2 && (
           <select value={bIdx} onChange={e=>setBIdx(+e.target.value)} style={{ ...inputStyle, width:"auto", fontSize:12, padding:"4px 8px" }}>
             {group.map((g,i)=>i!==0 && <option key={i} value={i}>Сравнить с #{i+1}</option>)}
@@ -1629,14 +1726,16 @@ function HealthTab({ families, allPrograms, onOpenMember, onOpenFamily, onMergeM
           <HealthStat label="Ошибки в данных" count={broken.length} color="#d97706" onClick={()=>setSubtab("broken")} />
         </div>
       )}
-      {subtab==="dupPeople" && (dupPeople.length===0 ? <NoIssues/> : dupPeople.map((g,i)=>
-        <DuplicatePeopleCard key={i} group={g} onMerge={onMergeMembers} onEdit={onOpenMember} onDelete={onDeleteMember} />
+      {subtab==="dupPeople" && (dupPeople.length===0 ? <NoIssues/> : dupPeople.map((item,i)=>
+        <DuplicatePeopleCard key={i} group={item.group} onMerge={onMergeMembers} onEdit={onOpenMember} onDelete={onDeleteMember}
+          badge={item.crossScript ? "🔤 Похоже, один человек — имя записано кириллицей и латиницей" : undefined} />
       ))}
       {subtab==="dupMis" && (dupMis.length===0 ? <NoIssues/> : dupMis.map((g,i)=>
         <DuplicatePeopleCard key={i} group={g} onMerge={onMergeMembers} onEdit={onOpenMember} onDelete={onDeleteMember} badge="Совпадает код MIS" />
       ))}
-      {subtab==="dupFamilies" && (dupFamilies.length===0 ? <NoIssues/> : dupFamilies.map((g,i)=>
-        <DuplicateFamilyCard key={i} group={g} onMerge={onMergeFamilies} onEdit={onOpenFamily} onDelete={onDeleteFamily} />
+      {subtab==="dupFamilies" && (dupFamilies.length===0 ? <NoIssues/> : dupFamilies.map((item,i)=>
+        <DuplicateFamilyCard key={i} group={item.group} onMerge={onMergeFamilies} onEdit={onOpenFamily} onDelete={onDeleteFamily}
+          badge={item.crossScript ? "🔤 Похоже, одна семья — название записано кириллицей и латиницей" : undefined} />
       ))}
       {subtab==="broken" && (broken.length===0 ? <NoIssues/> : broken.map((item,i)=>
         <BrokenDataRow key={i} item={item} onOpenMember={onOpenMember} onOpenFamily={onOpenFamily} />
