@@ -237,6 +237,7 @@ function MemberJCC({ member, allPrograms, onChange }) {
 const emptyMember = () => ({
   id: Date.now() + Math.random(),
   lastName:"", firstName:"", dob:"", relation:"", misCode:"", phone:"", email:"",
+  medicalNotes:"",
   isMadrich: false, isVolunteer: false,
   jcc: { active: false, programs: [] }
 });
@@ -255,6 +256,7 @@ function MembersEditor({ members, onChange, allPrograms, isHesed }) {
             <span style={{ fontWeight:700, fontSize:13, color:"#6366f1" }}>
               👤 Член семьи #{idx+1}
               {isMinor(m.dob) && <span style={{ marginLeft:8, background:"#fef3c7", color:"#92400e", border:"1px solid #fcd34d", borderRadius:4, padding:"1px 6px", fontSize:11 }}>👶 несовершеннолетний</span>}
+              {m.medicalNotes?.trim() && <span style={{ marginLeft:8, background:"#fee2e2", color:"#991b1b", border:"1px solid #fca5a5", borderRadius:4, padding:"1px 6px", fontSize:11 }}>⚠️ мед. особенности</span>}
             </span>
             <button onClick={()=>del(m.id)} style={{ background:"none", border:"1px solid #fca5a5", borderRadius:6, color:"#f87171", cursor:"pointer", padding:"3px 10px", fontSize:12 }}>Удалить</button>
           </div>
@@ -266,6 +268,9 @@ function MembersEditor({ members, onChange, allPrograms, isHesed }) {
             <label style={labelStyle}>Код MIS<input style={inputStyle} value={m.misCode} onChange={e=>upd(m.id,"misCode",e.target.value)} placeholder="MIS-001" /></label>
             <label style={labelStyle}>Телефон<input style={inputStyle} value={m.phone} onChange={e=>upd(m.id,"phone",e.target.value)} placeholder="+972-50-000-0000" /></label>
             <label style={{ ...labelStyle, gridColumn:"1/-1" }}>Email<input type="email" style={inputStyle} value={m.email} onChange={e=>upd(m.id,"email",e.target.value)} placeholder="ivan@example.com" /></label>
+            <label style={{ ...labelStyle, gridColumn:"1/-1" }}>Аллергии, медицинские особенности и другое
+              <textarea value={m.medicalNotes||""} onChange={e=>upd(m.id,"medicalNotes",e.target.value)} placeholder="Например: аллергия на орехи, непереносимость лактозы..." style={{ ...inputStyle, height:56, resize:"vertical" }} />
+            </label>
           </div>
           <div style={{ display:"flex", gap:20, marginTop:10, flexWrap:"wrap" }}>
             <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
@@ -402,7 +407,7 @@ function VisitsReadOnly({ visits }) {
 
 // ── Excel Export ──────────────────────────────────────────────────────────
 function exportExcel(families) {
-  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Код MIS","Телефон","Email","Мадрих","Волонтёр","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
+  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Код MIS","Телефон","Email","Аллергии/мед. особенности","Мадрих","Волонтёр","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
   const rows = [headers];
   families.forEach(f => {
     const totalAid = (f.aid||[]).reduce((s,a)=>s+(parseFloat(a.amount)||0),0);
@@ -417,6 +422,7 @@ function exportExcel(families) {
         age !== null ? age : "—",
         m?.dob ? (isMinor(m.dob)?"Да":"Нет") : "—",
         m?.relation||"", m?.misCode||"", m?.phone||"", m?.email||"",
+        m?.medicalNotes||"",
         m?.isMadrich?"Да":"Нет",
         m?.isVolunteer?"Да":"Нет",
         f.city||"", f.address||"",
@@ -452,13 +458,14 @@ function exportPDF(families) {
       <h3>👥 Члены семьи</h3>
       ${(f.members||[]).map(m=>`
         <div class="member">
-          <div class="mname">${m.lastName} ${m.firstName}${m.relation?` <span class="rel">(${m.relation})</span>`:""} ${isMinor(m.dob)?'<span class="badge minor">👶 несовершеннолетний</span>':""}</div>
+          <div class="mname">${m.lastName} ${m.firstName}${m.relation?` <span class="rel">(${m.relation})</span>`:""} ${isMinor(m.dob)?'<span class="badge minor">👶 несовершеннолетний</span>':""} ${m.medicalNotes?.trim()?'<span class="badge medical">⚠️ мед. особенности</span>':""}</div>
           <div class="mgrid">
             <div class="f"><div class="fl">Дата рождения</div><div class="fv">${formatDate(m.dob)}</div></div>
             <div class="f"><div class="fl">Возраст</div><div class="fv">${calcAge(m.dob)??'—'} лет</div></div>
             <div class="f"><div class="fl">Код MIS</div><div class="fv">${m.misCode||"—"}</div></div>
             <div class="f"><div class="fl">Телефон</div><div class="fv">${m.phone||"—"}</div></div>
             <div class="f"><div class="fl">Email</div><div class="fv">${m.email||"—"}</div></div>
+            ${m.medicalNotes?.trim()?`<div class="f medical" style="grid-column:1/-1"><div class="fl">⚠️ Аллергии/мед. особенности</div><div class="fv">${m.medicalNotes}</div></div>`:""}
             ${m.jcc?.active?`<div class="f" style="grid-column:1/-1"><div class="fl">JCC программы</div><div class="fv">${(m.jcc.programs||[]).map(p=>`${p.name}${p.notes?` (${p.notes})`:""}`).join("; ")||"—"}</div></div>`:""}
           </div>
         </div>
@@ -480,6 +487,9 @@ function exportPDF(families) {
     .badge.sn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
     .badge.sc{background:#d1fae5;color:#065f46;border:1px solid #6ee7b7}
     .badge.minor{background:#fef9c3;color:#713f12;border:1px solid #fde047}
+    .badge.medical{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+    .f.medical{background:#fef2f2;border:1px solid #fecaca}
+    .f.medical .fl{color:#991b1b}
     .comment{background:#f8fafc;border-left:3px solid #6366f1;padding:6px 10px;margin-bottom:8px;font-style:italic;color:#475569}
     .member{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-bottom:6px}
     .mname{font-weight:700;font-size:13px;margin-bottom:6px} .rel{font-weight:400;color:#6366f1;font-size:12px}
@@ -835,6 +845,7 @@ function downloadTemplate() {
     "Код MIS",
     "Телефон",
     "Email",
+    "Аллергии, медицинские особенности и другое",
     "Город",
     "Адрес (общий для семьи)",
     "Special Needs (Да/Нет)",
@@ -844,9 +855,9 @@ function downloadTemplate() {
     "JCC (Да/Нет)",
     "Программы JCC (через запятую)"
   ];
-  const example1 = ["Семья Иванов","Иванов","Иван","15.03.1942","Глава семьи","MIS-001","+972501234567","ivan@example.com","Тель-Авив","ул. Герцля 5","Нет","Да","Нет","Нет","Да","Беяхад Кидс, Лекции"];
-  const example2 = ["Семья Иванов","Иванова","Сара","22.07.1945","Супруга","MIS-002","+972501234568","","Тель-Авив","ул. Герцля 5","Да","Да","Нет","Нет","Нет",""];
-  const example3 = ["Семья Коэн","Коэн","Давид","01.01.1938","","MIS-003","","","Хайфа","пр. Мира 12","Нет","Нет","Нет","Да","Да","Лагеря"];
+  const example1 = ["Семья Иванов","Иванов","Иван","15.03.1942","Глава семьи","MIS-001","+972501234567","ivan@example.com","","Тель-Авив","ул. Герцля 5","Нет","Да","Нет","Нет","Да","Беяхад Кидс, Лекции"];
+  const example2 = ["Семья Иванов","Иванова","Сара","22.07.1945","Супруга","MIS-002","+972501234568","","Аллергия на орехи","Тель-Авив","ул. Герцля 5","Да","Да","Нет","Нет","Нет",""];
+  const example3 = ["Семья Коэн","Коэн","Давид","01.01.1938","","MIS-003","","","","Хайфа","пр. Мира 12","Нет","Нет","Нет","Да","Да","Лагеря"];
 
   const rows = [headers, example1, example2, example3];
   const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\n");
@@ -885,6 +896,7 @@ const IMPORT_COLUMNS = [
   { key:"misCode",      match:/\bmis\b/i },
   { key:"phone",        match:/телефон/i },
   { key:"email",        match:/e-?mail/i },
+  { key:"medicalNotes", match:/аллерг|мед\w*\s*особенн/i },
   { key:"city",         match:/город/i },
   { key:"address",      match:/адрес/i },
   { key:"specialNeeds", match:/special\s*needs/i },
@@ -1005,6 +1017,7 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
             misCode: r[cm.misCode]?.trim()||"",
             phone: r[cm.phone]?.trim()||"",
             email: r[cm.email]?.trim()||"",
+            medicalNotes: r[cm.medicalNotes]?.trim()||"",
             isMadrich: parseBool(r[cm.isMadrich]),
             isVolunteer: parseBool(r[cm.isVolunteer]),
             jcc: { active: jccActive, programs: jccPrograms }
@@ -1054,6 +1067,7 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
               };
               checkField("Телефон", old.phone, newM.phone);
               checkField("Email", old.email, newM.email);
+              checkField("Аллергии/мед. особенности", old.medicalNotes, newM.medicalNotes);
               checkField("Код MIS", old.misCode, newM.misCode);
               checkField("Степень родства", old.relation, newM.relation);
               checkField("Мадрих", old.isMadrich?"Да":"Нет", newM.isMadrich?"Да":"Нет");
@@ -1382,6 +1396,7 @@ const BROKEN_ICON = { missingName:"👤", badDob:"🎂", badPhone:"📞", badEma
 const MEMBER_COMPARE_FIELDS = [
   ["lastName","Фамилия"], ["firstName","Имя"], ["dob","Дата рождения"],
   ["relation","Степень родства"], ["misCode","Код MIS"], ["phone","Телефон"], ["email","Email"],
+  ["medicalNotes","Аллергии/мед. особенности"],
 ];
 const FAMILY_COMPARE_FIELDS = [
   ["familyName","Название семьи"], ["city","Город"], ["address","Адрес"],
@@ -1875,7 +1890,8 @@ export default function App() {
     const MEMBER_FIELDS = [
       ["lastName","Фамилия"],["firstName","Имя"],["dob","Дата рождения"],
       ["relation","Степень родства"],["misCode","Код MIS"],["phone","Телефон"],
-      ["email","Email"],["isMadrich","Мадрих"],["isVolunteer","Волонтёр"]
+      ["email","Email"],["medicalNotes","Аллергии/мед. особенности"],
+      ["isMadrich","Мадрих"],["isVolunteer","Волонтёр"]
     ];
     for (const nm of newMembers) {
       const om = oldMembers.find(m=>m.id===nm.id);
