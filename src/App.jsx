@@ -1444,6 +1444,25 @@ function namesAreClose(a, b) {
   const maxLen = Math.max(a.length, b.length);
   return levenshtein(a, b) <= Math.max(1, Math.round(maxLen * 0.25));
 }
+// Latvian official documents grammatically adapt foreign names/surnames by adding a
+// nominative-masculine ending (Мантуров → Manturovs, Иванов → Ivanovs). Strip a single
+// trailing ending of this kind so such pairs still compare as close.
+const LV_MASC_ENDINGS = ['skis','cis','zis','ins','ovs','evs','ajs','ejs','ijs','ojs','ujs','js','is','us','s'];
+function delatvianize(s) {
+  if (!s || s.length < 5) return s;
+  for (const e of LV_MASC_ENDINGS) {
+    if (s.length - e.length >= 3 && s.endsWith(e)) return s.slice(0, -e.length);
+  }
+  return s;
+}
+function namesAreCloseLv(a, b) {
+  if (namesAreClose(a, b)) return true;
+  const da = delatvianize(a), db = delatvianize(b);
+  if (da !== a && namesAreClose(da, b)) return true;
+  if (db !== b && namesAreClose(a, db)) return true;
+  if (da !== a && db !== b && namesAreClose(da, db)) return true;
+  return false;
+}
 
 function useHealthFindings(families, allPrograms) {
   return useMemo(() => {
@@ -1514,7 +1533,7 @@ function useHealthFindings(families, allPrograms) {
       for (let i=0; i<bucket.length; i++) for (let j=i+1; j<bucket.length; j++) {
         const a = bucket[i], b = bucket[j];
         if (a.isCyr === b.isCyr || a.member.id === b.member.id) continue;
-        if (!namesAreClose(a.canLast, b.canLast) || !namesAreClose(a.canFirst, b.canFirst)) continue;
+        if (!namesAreCloseLv(a.canLast, b.canLast) || !namesAreCloseLv(a.canFirst, b.canFirst)) continue;
         const key = [a.member.id, b.member.id].sort().join('|');
         if (seenPersonPairs.has(key)) continue;
         seenPersonPairs.add(key);
@@ -1539,7 +1558,7 @@ function useHealthFindings(families, allPrograms) {
     const crossScriptFamilies = [];
     for (let i=0; i<famEntries.length; i++) for (let j=i+1; j<famEntries.length; j++) {
       const a = famEntries[i], b = famEntries[j];
-      if (a.isCyr === b.isCyr || !namesAreClose(a.canName, b.canName)) continue;
+      if (a.isCyr === b.isCyr || !namesAreCloseLv(a.canName, b.canName)) continue;
       const key = [a.family.id, b.family.id].sort().join('|');
       if (seenFamPairs.has(key)) continue;
       seenFamPairs.add(key);
