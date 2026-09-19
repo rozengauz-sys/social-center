@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "./supabase";
+import jklLogo from "./assets/jkl-logo-white.png";
 
 // ── Constants ─────────────────────────────────────────────────────────────
 const CRITERIA = ["Мобильность","Когнитивные функции","Социальная изоляция","Финансовое положение","Состояние здоровья"];
@@ -128,8 +129,15 @@ function CriteriaSliders({ value, onChange, readOnly }) {
 }
 
 // ── JCC Programs Manager ──────────────────────────────────────────────────
-function JCCProgramsManager({ allPrograms, onProgramsChange }) {
+function JCCProgramsManager({ allPrograms, onProgramsChange, families=[] }) {
   const [newName, setNewName] = useState("");
+  const usageCount = useMemo(() => {
+    const counts = {};
+    families.forEach(f => (f.members||[]).forEach(m => {
+      (m.jcc?.programs||[]).forEach(p => { counts[p.id] = (counts[p.id]||0) + 1; });
+    }));
+    return counts;
+  }, [families]);
   const add = async () => {
     if (!newName.trim()) return;
     const { data, error } = await supabase.from("jcc_programs").insert({ name: newName.trim() }).select();
@@ -137,18 +145,31 @@ function JCCProgramsManager({ allPrograms, onProgramsChange }) {
     else alert("Программа с таким названием уже существует");
   };
   const del = async (id) => {
+    const used = usageCount[id]||0;
+    if (used > 0) {
+      alert(`Нельзя удалить: эту программу используют ${used} ${used===1?"участник":"участник(ов)"}. Сначала уберите программу у них.`);
+      return;
+    }
     if (!confirm("Удалить программу из справочника?")) return;
     await supabase.from("jcc_programs").delete().eq("id", id);
     onProgramsChange(allPrograms.filter(p=>p.id!==id));
   };
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-      {allPrograms.map(p => (
+      {allPrograms.map(p => {
+        const used = usageCount[p.id]||0;
+        return (
         <div key={p.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 10px", background:"#f8fafc", borderRadius:7, border:"1px solid #e2e8f0" }}>
-          <span style={{ fontSize:13, fontWeight:600 }}>{p.name}</span>
-          <button onClick={()=>del(p.id)} style={{ background:"none", border:"none", cursor:"pointer", color:"#f87171", fontSize:14, padding:0 }}>✕</button>
+          <span style={{ fontSize:13, fontWeight:600 }}>
+            {p.name}
+            <span style={{ marginLeft:8, fontSize:11, fontWeight:600, color:used>0?"#0284c7":"#94a3b8" }}>
+              {used>0 ? `👥 ${used}` : "не используется"}
+            </span>
+          </span>
+          <button onClick={()=>del(p.id)} title={used>0?"Программа используется — сначала уберите её у участников":"Удалить"} style={{ background:"none", border:"none", cursor:"pointer", color:used>0?"#cbd5e1":"#f87171", fontSize:14, padding:0 }}>✕</button>
         </div>
-      ))}
+        );
+      })}
       <div style={{ display:"flex", gap:8 }}>
         <input value={newName} onChange={e=>setNewName(e.target.value)}
           onKeyDown={e=>e.key==="Enter"&&add()}
@@ -470,7 +491,10 @@ function exportPDF(families) {
     .footer{text-align:center;color:#94a3b8;font-size:10px;margin-top:20px;border-top:1px solid #e2e8f0;padding-top:10px}
     @media print{.family{page-break-inside:avoid}}
   </style></head><body>
-  <h1>🏥 База клиентов социального центра</h1>
+  <div style="background:linear-gradient(135deg,#1e1b4b,#4c1d95);border-radius:8px;padding:14px 18px;margin-bottom:10px;display:flex;align-items:center;gap:14px">
+    <img src="${jklLogo}" alt="Еврейская община Риги" style="height:34px" />
+    <h1 style="margin:0;color:#fff">База участников программ еврейской общины Риги</h1>
+  </div>
   <div class="meta">Дата печати: ${formatDate(new Date().toISOString())} · Записей: ${families.length}</div>
   ${families.map(familyHTML).join("")}
   <div class="footer">База клиентов социального центра · ${new Date().toLocaleDateString("ru-RU")}</div>
@@ -849,8 +873,45 @@ function parseBool(str) {
   return str.trim().toLowerCase() === "да" || str.trim().toLowerCase() === "yes";
 }
 
+// ── Import column mapping ─────────────────────────────────────────────────
+// Canonical order matches downloadTemplate() headers; each entry's position
+// is also the positional fallback index used when a header isn't recognized.
+const IMPORT_COLUMNS = [
+  { key:"familyName",   match:/название\s*семьи/i },
+  { key:"lastName",     match:/фамилия/i },
+  { key:"firstName",    match:/(?:^|[^а-яё])имя(?!.*семь)/i },
+  { key:"dob",          match:/дата\s*рожд/i },
+  { key:"relation",     match:/родств/i },
+  { key:"misCode",      match:/\bmis\b/i },
+  { key:"phone",        match:/телефон/i },
+  { key:"email",        match:/e-?mail/i },
+  { key:"city",         match:/город/i },
+  { key:"address",      match:/адрес/i },
+  { key:"specialNeeds", match:/special\s*needs/i },
+  { key:"socialCenter", match:/социальн\w*\s*центр/i },
+  { key:"isMadrich",    match:/мадрих/i },
+  { key:"isVolunteer",  match:/волонт/i },
+  { key:"jccActive",    match:/^\s*jcc\b(?!.*программ)/i },
+  { key:"jccPrograms",  match:/программ/i },
+];
+function buildColumnMap(headerRow) {
+  const map = {};
+  const used = new Set();
+  IMPORT_COLUMNS.forEach((col, defaultIdx) => {
+    let foundIdx = -1;
+    for (let i=0; i<headerRow.length; i++) {
+      if (used.has(i)) continue;
+      if (col.match.test(headerRow[i]||"")) { foundIdx = i; break; }
+    }
+    if (foundIdx === -1) foundIdx = defaultIdx; // fall back to canonical position
+    used.add(foundIdx);
+    map[col.key] = foundIdx;
+  });
+  return map;
+}
+
 // ── Import Modal ──────────────────────────────────────────────────────────
-function ImportModal({ onClose, allPrograms, families, setFamilies, session }) {
+function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamilies, session }) {
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
   const [report, setReport] = useState(null);
@@ -863,8 +924,6 @@ function ImportModal({ onClose, allPrograms, families, setFamilies, session }) {
 
     const text = await file.text();
     const lines = text.split("\n").filter(l=>l.trim());
-    // Skip header row
-    const dataLines = lines.slice(1);
 
     // Parse CSV respecting quoted fields
     const parseCSVLine = (line) => {
@@ -880,12 +939,17 @@ function ImportModal({ onClose, allPrograms, families, setFamilies, session }) {
       return result.map(s=>s.replace(/^"|"$/g,"").replace(/""/g,'"').trim());
     };
 
-    const rows = dataLines.map(parseCSVLine).filter(r=>r[0]||r[1]);
+    // Header row drives column mapping; falls back to positional defaults
+    const headerRow = lines[0] ? parseCSVLine(lines[0]) : [];
+    const cm = buildColumnMap(headerRow);
+    const dataLines = lines.slice(1);
+
+    const rows = dataLines.map(parseCSVLine).filter(r=>r[cm.familyName]||r[cm.lastName]);
 
     // Group rows by family name
     const familyMap = {};
     rows.forEach(r => {
-      const familyName = r[0]?.trim();
+      const familyName = r[cm.familyName]?.trim();
       if (!familyName) return;
       if (!familyMap[familyName]) familyMap[familyName] = [];
       familyMap[familyName].push(r);
@@ -894,33 +958,55 @@ function ImportModal({ onClose, allPrograms, families, setFamilies, session }) {
     const created = [];
     const updated = [];
     const errors = [];
+    const autoCreatedPrograms = [];
 
     // Load fresh families from DB
     const { data: dbFamilies } = await supabase.from("families").select("*").order("family_name");
     const currentFamilies = (dbFamilies||[]).map(fromDB);
+
+    // Pre-scan all rows for JCC program names not yet in the reference list,
+    // and create them up front so no member ends up referencing an
+    // unpersisted/orphaned program id.
+    let currentPrograms = [...allPrograms];
+    const neededNames = new Set();
+    rows.forEach(r => {
+      (r[cm.jccPrograms]||"").split(",").map(s=>s.trim()).filter(Boolean).forEach(n=>neededNames.add(n));
+    });
+    const missingNames = [...neededNames].filter(name =>
+      !currentPrograms.find(p=>p.name.toLowerCase()===name.toLowerCase())
+    );
+    if (missingNames.length>0) {
+      const { data: insertedProgs, error: progErr } = await supabase
+        .from("jcc_programs").insert(missingNames.map(name=>({ name }))).select();
+      if (!progErr && insertedProgs) {
+        currentPrograms = [...currentPrograms, ...insertedProgs];
+        autoCreatedPrograms.push(...insertedProgs.map(p=>p.name));
+        setAllPrograms(currentPrograms);
+      }
+    }
 
     for (const [familyName, rows] of Object.entries(familyMap)) {
       try {
         const existingFamily = currentFamilies.find(f=>f.familyName.trim().toLowerCase()===familyName.toLowerCase());
 
         const newMembers = rows.map(r => {
-          const jccActive = parseBool(r[14]);
-          const jccProgramNames = (r[15]||"").split(",").map(s=>s.trim()).filter(Boolean);
+          const jccActive = parseBool(r[cm.jccActive]);
+          const jccProgramNames = (r[cm.jccPrograms]||"").split(",").map(s=>s.trim()).filter(Boolean);
           const jccPrograms = jccProgramNames.map(name => {
-            const prog = allPrograms.find(p=>p.name.toLowerCase()===name.toLowerCase());
+            const prog = currentPrograms.find(p=>p.name.toLowerCase()===name.toLowerCase());
             return prog ? { id:prog.id, name:prog.name, notes:"" } : { id:Date.now()+Math.random(), name, notes:"" };
           });
           return {
             id: Date.now() + Math.random(),
-            lastName: r[1]?.trim()||"",
-            firstName: r[2]?.trim()||"",
-            dob: parseImportDate(r[3]),
-            relation: r[4]?.trim()||"",
-            misCode: r[5]?.trim()||"",
-            phone: r[6]?.trim()||"",
-            email: r[7]?.trim()||"",
-            isMadrich: parseBool(r[12]),
-            isVolunteer: parseBool(r[13]),
+            lastName: r[cm.lastName]?.trim()||"",
+            firstName: r[cm.firstName]?.trim()||"",
+            dob: parseImportDate(r[cm.dob]),
+            relation: r[cm.relation]?.trim()||"",
+            misCode: r[cm.misCode]?.trim()||"",
+            phone: r[cm.phone]?.trim()||"",
+            email: r[cm.email]?.trim()||"",
+            isMadrich: parseBool(r[cm.isMadrich]),
+            isVolunteer: parseBool(r[cm.isVolunteer]),
             jcc: { active: jccActive, programs: jccPrograms }
           };
         }).filter(m=>m.lastName&&m.firstName);
@@ -930,10 +1016,10 @@ function ImportModal({ onClose, allPrograms, families, setFamilies, session }) {
           const firstRow = rows[0];
           const newFamily = {
             familyName,
-            city: firstRow[8]?.trim()||"",
-            address: firstRow[9]?.trim()||"",
-            specialNeeds: parseBool(firstRow[10]),
-            socialCenter: parseBool(firstRow[11]),
+            city: firstRow[cm.city]?.trim()||"",
+            address: firstRow[cm.address]?.trim()||"",
+            specialNeeds: parseBool(firstRow[cm.specialNeeds]),
+            socialCenter: parseBool(firstRow[cm.socialCenter]),
             criteria: {0:0,1:0,2:0,3:0,4:0},
             comment: "",
             nextVisit: "",
@@ -999,10 +1085,10 @@ function ImportModal({ onClose, allPrograms, families, setFamilies, session }) {
               familyChanges.push({ field:label, was:oldVal||"(пусто)", became:newVal });
             }
           };
-          const newCity = firstRow[8]?.trim()||"";
-          const newAddress = firstRow[9]?.trim()||"";
-          const newSN = parseBool(firstRow[10]);
-          const newSC = parseBool(firstRow[11]);
+          const newCity = firstRow[cm.city]?.trim()||"";
+          const newAddress = firstRow[cm.address]?.trim()||"";
+          const newSN = parseBool(firstRow[cm.specialNeeds]);
+          const newSC = parseBool(firstRow[cm.socialCenter]);
           checkFam("Город", existingFamily.city, newCity);
           checkFam("Адрес", existingFamily.address, newAddress);
           checkFam("Special Needs", existingFamily.specialNeeds?"Да":"Нет", newSN?"Да":"Нет");
@@ -1029,7 +1115,7 @@ function ImportModal({ onClose, allPrograms, families, setFamilies, session }) {
     }
 
     // Save log to Supabase
-    const summary = { created, updated, errors, total_rows:rows.length, filename:file.name };
+    const summary = { created, updated, errors, autoCreatedPrograms, total_rows:rows.length, filename:file.name };
     await supabase.from("import_logs").insert({
       imported_by: session.user.email,
       summary,
@@ -1102,6 +1188,12 @@ function ImportReport({ report, onClose }) {
           <div style={{ fontSize:12,color:report.errors.length>0?"#991b1b":"#64748b",fontWeight:600 }}>Ошибок</div>
         </div>
       </div>
+      {report.autoCreatedPrograms?.length>0 && (
+        <div style={{ background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:14 }}>
+          <div style={{ fontWeight:700,fontSize:13,color:"#92400e",marginBottom:6 }}>🆕 Автоматически созданы новые программы JCC ({report.autoCreatedPrograms.length})</div>
+          <div style={{ fontSize:13,color:"#78350f" }}>{report.autoCreatedPrograms.join(", ")}</div>
+        </div>
+      )}
 
       {report.created.length>0 && (
         <div>
@@ -1282,18 +1374,274 @@ function ImportTab() {
   );
 }
 
-function LogsModal({ onClose }) {
+// ── Data Health Check ─────────────────────────────────────────────────────
+const PHONE_MIN_DIGITS = 5;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const normKey = (s) => (s||"").trim().toLowerCase();
+const BROKEN_ICON = { missingName:"👤", badDob:"🎂", badPhone:"📞", badEmail:"✉️", jccNoPrograms:"🏛", orphanProgram:"🔗", emptyFamily:"🏠" };
+const MEMBER_COMPARE_FIELDS = [
+  ["lastName","Фамилия"], ["firstName","Имя"], ["dob","Дата рождения"],
+  ["relation","Степень родства"], ["misCode","Код MIS"], ["phone","Телефон"], ["email","Email"],
+];
+const FAMILY_COMPARE_FIELDS = [
+  ["familyName","Название семьи"], ["city","Город"], ["address","Адрес"],
+  ["comment","Комментарий"], ["nextVisit","Дата визита"],
+];
+
+function useHealthFindings(families, allPrograms) {
+  return useMemo(() => {
+    const dupPeopleMap = {}, dupMisMap = {}, dupFamilyMap = {};
+    const broken = [];
+
+    families.forEach(f => {
+      if (f.familyName?.trim()) {
+        const famKey = `${normKey(f.familyName)}|${normKey(f.address)}`;
+        (dupFamilyMap[famKey] ||= []).push(f);
+      }
+      if ((f.members||[]).length===0) {
+        broken.push({ type:"emptyFamily", family:f, label:`Семья «${f.familyName||"без названия"}» без единого участника` });
+      }
+      (f.members||[]).forEach(m => {
+        if (!m.lastName?.trim() || !m.firstName?.trim()) {
+          broken.push({ type:"missingName", family:f, member:m, label:`Не заполнены фамилия/имя (семья «${f.familyName}»)` });
+        }
+        if (m.dob) {
+          const d = new Date(m.dob);
+          if (isNaN(d) || d > new Date()) {
+            broken.push({ type:"badDob", family:f, member:m, label:`Некорректная дата рождения «${m.dob}» — ${m.lastName} ${m.firstName}` });
+          }
+        }
+        if (m.phone && m.phone.replace(/\D/g,"").length < PHONE_MIN_DIGITS) {
+          broken.push({ type:"badPhone", family:f, member:m, label:`Подозрительный телефон «${m.phone}» — ${m.lastName} ${m.firstName}` });
+        }
+        if (m.email && !EMAIL_RE.test(m.email.trim())) {
+          broken.push({ type:"badEmail", family:f, member:m, label:`Некорректный email «${m.email}» — ${m.lastName} ${m.firstName}` });
+        }
+        if (m.jcc?.active && (m.jcc.programs||[]).length===0) {
+          broken.push({ type:"jccNoPrograms", family:f, member:m, label:`Отмечено «Участвует в JCC», но программы не выбраны — ${m.lastName} ${m.firstName}` });
+        }
+        (m.jcc?.programs||[]).forEach(p => {
+          if (!allPrograms.find(ap=>ap.id===p.id)) {
+            broken.push({ type:"orphanProgram", family:f, member:m, label:`Ссылка на несуществующую программу «${p.name}» — ${m.lastName} ${m.firstName}` });
+          }
+        });
+        if (m.lastName?.trim() && m.firstName?.trim()) {
+          const key = `${normKey(m.lastName)}|${normKey(m.firstName)}|${m.dob||""}`;
+          (dupPeopleMap[key] ||= []).push({ family:f, member:m });
+        }
+        if (m.misCode?.trim()) {
+          const key = normKey(m.misCode);
+          (dupMisMap[key] ||= []).push({ family:f, member:m });
+        }
+      });
+    });
+
+    const dupPeople = Object.values(dupPeopleMap).filter(g=>g.length>1);
+    const dupMis = Object.values(dupMisMap).filter(g=>g.length>1);
+    const dupFamilies = Object.values(dupFamilyMap).filter(g=>g.length>1);
+    return { dupPeople, dupMis, dupFamilies, broken };
+  }, [families, allPrograms]);
+}
+
+function NoIssues() {
+  return <div style={{ textAlign:"center",color:"#94a3b8",padding:30,fontSize:13 }}>Проблем в этой категории нет</div>;
+}
+
+function HealthStat({ label, count, color, onClick }) {
+  return (
+    <button onClick={onClick} style={{ textAlign:"left", background:count>0?"#fef2f2":"#f0fdf4", border:`1px solid ${count>0?"#fecaca":"#bbf7d0"}`, borderRadius:10, padding:14, cursor:"pointer" }}>
+      <div style={{ fontSize:24, fontWeight:800, color:count>0?color:"#059669" }}>{count}</div>
+      <div style={{ fontSize:12, color:"#475569", fontWeight:600, marginTop:2 }}>{label}</div>
+    </button>
+  );
+}
+
+function BrokenDataRow({ item, onOpenMember, onOpenFamily }) {
+  return (
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:9, padding:"10px 14px", marginBottom:8 }}>
+      <div style={{ fontSize:13, color:"#78350f" }}>
+        <span style={{ marginRight:6 }}>{BROKEN_ICON[item.type]||"⚠️"}</span>{item.label}
+      </div>
+      <button onClick={()=> item.member ? onOpenMember(item.family, item.member.id) : onOpenFamily(item.family)}
+        style={{ ...btnSecondary, fontSize:12, padding:"5px 12px", flexShrink:0 }}>✏️ Исправить</button>
+    </div>
+  );
+}
+
+function DuplicatePeopleCard({ group, onMerge, onEdit, onDelete, badge }) {
+  const [bIdx, setBIdx] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [choice, setChoice] = useState({});
+  const a = group[0];
+  const b = group[Math.min(bIdx, group.length-1)];
+  const pick = (field, side) => setChoice(c=>({...c,[field]:side}));
+
+  const doMerge = async () => {
+    setBusy(true);
+    const merged = { ...a.member };
+    MEMBER_COMPARE_FIELDS.forEach(([field]) => {
+      const side = choice[field] || (a.member[field] ? "a" : "b");
+      merged[field] = (side==="a"?a:b).member[field];
+    });
+    const jccSide = (b.member.jcc?.programs?.length||0) > (a.member.jcc?.programs?.length||0) ? b : a;
+    merged.jcc = jccSide.member.jcc || { active:false, programs:[] };
+    merged.isMadrich = !!(a.member.isMadrich || b.member.isMadrich);
+    merged.isVolunteer = !!(a.member.isVolunteer || b.member.isVolunteer);
+    await onMerge({ familyIdA:a.family.id, memberIdA:a.member.id, familyIdB:b.family.id, memberIdB:b.member.id, merged });
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:12, padding:16, marginBottom:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, flexWrap:"wrap", gap:8 }}>
+        <div style={{ fontWeight:700, fontSize:13, color:"#991b1b" }}>{badge||"Похожие записи"} — {group.length} шт.</div>
+        {group.length>2 && (
+          <select value={bIdx} onChange={e=>setBIdx(+e.target.value)} style={{ ...inputStyle, width:"auto", fontSize:12, padding:"4px 8px" }}>
+            {group.map((g,i)=>i!==0 && <option key={i} value={i}>Сравнить с #{i+1}: {g.family.familyName}</option>)}
+          </select>
+        )}
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+        {[["a",a],["b",b]].map(([side,entry])=>(
+          <div key={side} style={{ background:"#fff", border:"1px solid #fecaca", borderRadius:8, padding:10 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#991b1b", marginBottom:6 }}>Семья «{entry.family.familyName}»</div>
+            {MEMBER_COMPARE_FIELDS.map(([field,label])=>(
+              <label key={field} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, marginBottom:3, cursor:"pointer" }}>
+                <input type="radio" name={`${field}-${a.member.id}-${b.member.id}`} checked={(choice[field]||(a.member[field]?"a":"b"))===side} onChange={()=>pick(field,side)} />
+                <span style={{ color:"#64748b", width:100, flexShrink:0 }}>{label}:</span>
+                <span style={{ fontWeight:600 }}>{entry.member[field]||"—"}</span>
+              </label>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+        <button onClick={doMerge} disabled={busy} style={{ ...btnPrimary, fontSize:12, padding:"7px 14px" }}>🔀 Объединить в одну запись</button>
+        <button onClick={()=>onEdit(a.family,a.member.id)} style={{ ...btnSecondary, fontSize:12, padding:"7px 14px" }}>✏️ Открыть #1</button>
+        <button onClick={()=>onEdit(b.family,b.member.id)} style={{ ...btnSecondary, fontSize:12, padding:"7px 14px" }}>✏️ Открыть #2</button>
+        <button onClick={()=>{ if(confirm("Удалить запись #2 без объединения?")) onDelete(b.family.id,b.member.id); }} style={{ ...btnDanger, fontSize:12, padding:"7px 14px" }}>🗑 Удалить #2</button>
+        <button onClick={()=>{ if(confirm("Удалить запись #1 без объединения?")) onDelete(a.family.id,a.member.id); }} style={{ ...btnDanger, fontSize:12, padding:"7px 14px" }}>🗑 Удалить #1</button>
+      </div>
+    </div>
+  );
+}
+
+function DuplicateFamilyCard({ group, onMerge, onEdit, onDelete }) {
+  const [bIdx, setBIdx] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [choice, setChoice] = useState({});
+  const a = group[0];
+  const b = group[Math.min(bIdx, group.length-1)];
+  const pick = (field, side) => setChoice(c=>({...c,[field]:side}));
+
+  const doMerge = async () => {
+    setBusy(true);
+    const merged = { ...a };
+    FAMILY_COMPARE_FIELDS.forEach(([field]) => {
+      const side = choice[field] || (a[field] ? "a" : "b");
+      merged[field] = (side==="a"?a:b)[field];
+    });
+    merged.specialNeeds = !!(a.specialNeeds || b.specialNeeds);
+    merged.socialCenter = !!(a.socialCenter || b.socialCenter);
+    await onMerge({ keepId:a.id, dropId:b.id, merged });
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:12, padding:16, marginBottom:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, flexWrap:"wrap", gap:8 }}>
+        <div style={{ fontWeight:700, fontSize:13, color:"#92400e" }}>Похожие семьи — {group.length} шт.</div>
+        {group.length>2 && (
+          <select value={bIdx} onChange={e=>setBIdx(+e.target.value)} style={{ ...inputStyle, width:"auto", fontSize:12, padding:"4px 8px" }}>
+            {group.map((g,i)=>i!==0 && <option key={i} value={i}>Сравнить с #{i+1}</option>)}
+          </select>
+        )}
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:10 }}>
+        {[["a",a],["b",b]].map(([side,fam])=>(
+          <div key={side} style={{ background:"#fff", border:"1px solid #fde68a", borderRadius:8, padding:10 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#92400e", marginBottom:6 }}>👥 {(fam.members||[]).length} чел.</div>
+            {FAMILY_COMPARE_FIELDS.map(([field,label])=>(
+              <label key={field} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, marginBottom:3, cursor:"pointer" }}>
+                <input type="radio" name={`fam-${field}-${a.id}-${b.id}`} checked={(choice[field]||(a[field]?"a":"b"))===side} onChange={()=>pick(field,side)} />
+                <span style={{ color:"#64748b", width:110, flexShrink:0 }}>{label}:</span>
+                <span style={{ fontWeight:600 }}>{fam[field]||"—"}</span>
+              </label>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize:11, color:"#92400e", marginBottom:10 }}>При объединении участники, помощь и визиты обеих записей будут объединены (без потери данных).</div>
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+        <button onClick={doMerge} disabled={busy} style={{ ...btnPrimary, fontSize:12, padding:"7px 14px" }}>🔀 Объединить семьи</button>
+        <button onClick={()=>onEdit(a)} style={{ ...btnSecondary, fontSize:12, padding:"7px 14px" }}>✏️ Открыть #1</button>
+        <button onClick={()=>onEdit(b)} style={{ ...btnSecondary, fontSize:12, padding:"7px 14px" }}>✏️ Открыть #2</button>
+        <button onClick={()=>{ if(confirm("Удалить запись #2 без объединения?")) onDelete(b.id); }} style={{ ...btnDanger, fontSize:12, padding:"7px 14px" }}>🗑 Удалить #2</button>
+      </div>
+    </div>
+  );
+}
+
+function HealthTab({ families, allPrograms, onOpenMember, onOpenFamily, onMergeMembers, onMergeFamilies, onDeleteMember, onDeleteFamily }) {
+  const { dupPeople, dupMis, dupFamilies, broken } = useHealthFindings(families, allPrograms);
+  const [subtab, setSubtab] = useState("summary");
+  const totalIssues = dupPeople.length + dupMis.length + dupFamilies.length + broken.length;
+
+  if (totalIssues===0) {
+    return (
+      <div style={{ textAlign:"center", color:"#059669", padding:40 }}>
+        <div style={{ fontSize:40 }}>✅</div>
+        <div style={{ fontSize:15, fontWeight:700, marginTop:8 }}>Проблем не найдено</div>
+        <div style={{ fontSize:13, color:"#64748b", marginTop:4 }}>Проверено семей: {families.length}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }}>
+        {[["summary","📊 Сводка"],["dupPeople",`👥 Дубли людей (${dupPeople.length})`],["dupMis",`🆔 Дубли по MIS (${dupMis.length})`],["dupFamilies",`🏠 Дубли семей (${dupFamilies.length})`],["broken",`⚠️ Ошибки данных (${broken.length})`]].map(([k,l])=>(
+          <button key={k} onClick={()=>setSubtab(k)} style={{ padding:"5px 12px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:12,fontWeight:600,
+            background:subtab===k?"#6366f1":"#fff",color:subtab===k?"#fff":"#475569",borderColor:subtab===k?"#6366f1":"#e2e8f0" }}>{l}</button>
+        ))}
+      </div>
+
+      {subtab==="summary" && (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+          <HealthStat label="Дубли людей" count={dupPeople.length} color="#dc2626" onClick={()=>setSubtab("dupPeople")} />
+          <HealthStat label="Дубли по коду MIS" count={dupMis.length} color="#dc2626" onClick={()=>setSubtab("dupMis")} />
+          <HealthStat label="Дубли семей" count={dupFamilies.length} color="#d97706" onClick={()=>setSubtab("dupFamilies")} />
+          <HealthStat label="Ошибки в данных" count={broken.length} color="#d97706" onClick={()=>setSubtab("broken")} />
+        </div>
+      )}
+      {subtab==="dupPeople" && (dupPeople.length===0 ? <NoIssues/> : dupPeople.map((g,i)=>
+        <DuplicatePeopleCard key={i} group={g} onMerge={onMergeMembers} onEdit={onOpenMember} onDelete={onDeleteMember} />
+      ))}
+      {subtab==="dupMis" && (dupMis.length===0 ? <NoIssues/> : dupMis.map((g,i)=>
+        <DuplicatePeopleCard key={i} group={g} onMerge={onMergeMembers} onEdit={onOpenMember} onDelete={onDeleteMember} badge="Совпадает код MIS" />
+      ))}
+      {subtab==="dupFamilies" && (dupFamilies.length===0 ? <NoIssues/> : dupFamilies.map((g,i)=>
+        <DuplicateFamilyCard key={i} group={g} onMerge={onMergeFamilies} onEdit={onOpenFamily} onDelete={onDeleteFamily} />
+      ))}
+      {subtab==="broken" && (broken.length===0 ? <NoIssues/> : broken.map((item,i)=>
+        <BrokenDataRow key={i} item={item} onOpenMember={onOpenMember} onOpenFamily={onOpenFamily} />
+      ))}
+    </div>
+  );
+}
+
+function LogsModal({ onClose, families, allPrograms, onOpenMember, onOpenFamily, onMergeMembers, onMergeFamilies, onDeleteMember, onDeleteFamily }) {
   const [tab, setTab] = useState("changes");
   return (
     <div style={{ position:"fixed",inset:0,background:"rgba(15,23,42,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
-      <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:720,maxHeight:"92vh",overflow:"auto",boxShadow:"0 25px 60px rgba(0,0,0,0.35)" }}>
+      <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:820,maxHeight:"92vh",overflow:"auto",boxShadow:"0 25px 60px rgba(0,0,0,0.35)" }}>
         <div style={{ padding:"20px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",background:"linear-gradient(135deg,#374151,#1f2937)",borderRadius:"16px 16px 0 0",position:"sticky",top:0,zIndex:10 }}>
           <h2 style={{ margin:0,color:"#fff",fontSize:20 }}>📋 Логи</h2>
           <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",borderRadius:8,padding:"4px 12px",cursor:"pointer",fontSize:18 }}>✕</button>
         </div>
         <div style={{ padding:"16px 24px 0" }}>
-          <div style={{ display:"flex", gap:8, borderBottom:"2px solid #e2e8f0", marginBottom:16 }}>
-            {[["changes","🔄 Изменения в базе"],["import","📥 Импорт"]].map(([k,l])=>(
+          <div style={{ display:"flex", gap:8, borderBottom:"2px solid #e2e8f0", marginBottom:16, flexWrap:"wrap" }}>
+            {[["changes","🔄 Изменения в базе"],["import","📥 Импорт"],["health","🔍 Проверка данных"]].map(([k,l])=>(
               <button key={k} onClick={()=>setTab(k)} style={{
                 padding:"8px 16px",background:"none",border:"none",cursor:"pointer",fontWeight:700,fontSize:13,
                 color:tab===k?"#6366f1":"#94a3b8",
@@ -1304,7 +1652,12 @@ function LogsModal({ onClose }) {
           </div>
         </div>
         <div style={{ padding:"0 24px 24px" }}>
-          {tab==="changes" ? <ChangesTab /> : <ImportTab />}
+          {tab==="changes" ? <ChangesTab />
+            : tab==="import" ? <ImportTab />
+            : <HealthTab families={families} allPrograms={allPrograms}
+                onOpenMember={onOpenMember} onOpenFamily={onOpenFamily}
+                onMergeMembers={onMergeMembers} onMergeFamilies={onMergeFamilies}
+                onDeleteMember={onDeleteMember} onDeleteFamily={onDeleteFamily} />}
         </div>
       </div>
     </div>
@@ -1391,9 +1744,9 @@ function LoginScreen() {
   return (
     <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#1e1b4b,#312e81,#4c1d95)", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <div style={{ background:"rgba(255,255,255,0.05)", backdropFilter:"blur(20px)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:20, padding:48, width:380, textAlign:"center" }}>
-        <div style={{ fontSize:48, marginBottom:8 }}>🏥</div>
-        <h1 style={{ color:"#fff", fontSize:22, marginBottom:4 }}>База клиентов</h1>
-        <p style={{ color:"#a5b4fc", fontSize:14, marginBottom:28 }}>Социальный центр</p>
+        <img src={jklLogo} alt="Еврейская община Риги" style={{ height:44, marginBottom:14 }} />
+        <h1 style={{ color:"#fff", fontSize:22, marginBottom:4 }}>База участников</h1>
+        <p style={{ color:"#a5b4fc", fontSize:14, marginBottom:28 }}>Программы еврейской общины Риги</p>
         <input type="email" placeholder="Email" value={email} onChange={e=>{setEmail(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handleLogin()} style={{ width:"100%",padding:"12px 16px",borderRadius:10,fontSize:15,border:error?"2px solid #f87171":"2px solid rgba(255,255,255,0.2)",background:"rgba(255,255,255,0.1)",color:"#fff",outline:"none",boxSizing:"border-box",marginBottom:10 }} />
         <input type="password" placeholder="Пароль" value={password} onChange={e=>{setPassword(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&handleLogin()} style={{ width:"100%",padding:"12px 16px",borderRadius:10,fontSize:15,border:error?"2px solid #f87171":"2px solid rgba(255,255,255,0.2)",background:"rgba(255,255,255,0.1)",color:"#fff",outline:"none",boxSizing:"border-box",marginBottom:8 }} />
         {error && <p style={{ color:"#f87171",fontSize:13,marginBottom:8 }}>{error}</p>}
@@ -1638,6 +1991,71 @@ export default function App() {
     }});
   };
 
+  // ── Data-health remediation actions ──────────────────────────────────────
+  const deleteMemberFromFamily = async (familyId, memberId) => {
+    const family = families.find(f=>f.id===familyId);
+    if (!family) return;
+    const member = (family.members||[]).find(m=>m.id===memberId);
+    const updatedFamily = { ...family, members:(family.members||[]).filter(m=>m.id!==memberId) };
+    const { error } = await supabase.from("families").update(toDB(updatedFamily)).eq("id", familyId);
+    if (error) { alert("Ошибка: "+error.message); return; }
+    setFamilies(prev=>prev.map(f=>f.id===familyId?updatedFamily:f));
+    if (member) await logChange("delete","member",family.familyName,`${member.lastName} ${member.firstName}`,[{field:"Статус",was:"Член семьи",became:"Удалён при проверке данных"}]);
+  };
+
+  const mergeDuplicateMembers = async ({ familyIdA, memberIdA, familyIdB, memberIdB, merged }) => {
+    const famA = families.find(f=>f.id===familyIdA);
+    const famB = families.find(f=>f.id===familyIdB);
+    if (!famA || !famB) return;
+    const mergedMember = { ...merged, id: memberIdA };
+    let updatedA, updatedB;
+    if (familyIdA === familyIdB) {
+      updatedA = { ...famA, members:(famA.members||[]).map(m=>m.id===memberIdA?mergedMember:m).filter(m=>m.id!==memberIdB) };
+      updatedB = updatedA;
+    } else {
+      updatedA = { ...famA, members:(famA.members||[]).map(m=>m.id===memberIdA?mergedMember:m) };
+      updatedB = { ...famB, members:(famB.members||[]).filter(m=>m.id!==memberIdB) };
+    }
+    const { error:eA } = await supabase.from("families").update(toDB(updatedA)).eq("id", familyIdA);
+    if (eA) { alert("Ошибка: "+eA.message); return; }
+    if (familyIdA !== familyIdB) {
+      const { error:eB } = await supabase.from("families").update(toDB(updatedB)).eq("id", familyIdB);
+      if (eB) { alert("Ошибка: "+eB.message); return; }
+    }
+    setFamilies(prev=>prev.map(f=>{
+      if (f.id===familyIdA) return updatedA;
+      if (f.id===familyIdB) return updatedB;
+      return f;
+    }));
+    await logChange("update","member",famA.familyName,`${mergedMember.lastName} ${mergedMember.firstName}`,[
+      { field:"Статус", was:"Дубликат", became: familyIdA!==familyIdB ? `Объединён с записью из семьи «${famB.familyName}»` : "Объединён с дубликатом в той же семье" }
+    ]);
+  };
+
+  const mergeDuplicateFamilies = async ({ keepId, dropId, merged }) => {
+    const keep = families.find(f=>f.id===keepId);
+    const drop = families.find(f=>f.id===dropId);
+    if (!keep || !drop) return;
+    const memberKey = m => `${(m.lastName||"").toLowerCase()}|${(m.firstName||"").toLowerCase()}|${m.dob||""}`;
+    const existingKeys = new Set((keep.members||[]).map(memberKey));
+    const extraMembers = (drop.members||[]).filter(m=>!existingKeys.has(memberKey(m)));
+    const mergedFamily = {
+      ...merged,
+      id: keepId,
+      members: [...(keep.members||[]), ...extraMembers],
+      aid: [...(keep.aid||[]), ...(drop.aid||[])],
+      visits: [...(keep.visits||[]), ...(drop.visits||[])],
+    };
+    const { error:e1 } = await supabase.from("families").update(toDB(mergedFamily)).eq("id", keepId);
+    if (e1) { alert("Ошибка: "+e1.message); return; }
+    const { error:e2 } = await supabase.from("families").delete().eq("id", dropId);
+    if (e2) { alert("Ошибка: "+e2.message); return; }
+    setFamilies(prev=>prev.filter(f=>f.id!==dropId).map(f=>f.id===keepId?mergedFamily:f));
+    await logChange("update","family",mergedFamily.familyName,"",[
+      { field:"Статус", was:`2 записи («${keep.familyName}» и «${drop.familyName}»)`, became:"Объединены в одну запись" }
+    ]);
+  };
+
   const handleLogout = async () => { await supabase.auth.signOut(); setSession(null); setFamilies([]); };
   const resetFilters = () => { setSearch(""); setFilter("all"); };
 
@@ -1658,7 +2076,10 @@ export default function App() {
       <div style={{ background:"linear-gradient(135deg,#4f46e5,#7c3aed)", padding:"20px 24px", color:"#fff", boxShadow:"0 4px 20px rgba(79,70,229,0.4)" }}>
         <div style={{ maxWidth:940, margin:"0 auto", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
           <div>
-            <h1 style={{ margin:0, fontSize:22, fontWeight:800 }}>🏥 База клиентов</h1>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <img src={jklLogo} alt="Еврейская община Риги" style={{ height:26 }} />
+              <h1 style={{ margin:0, fontSize:22, fontWeight:800 }}>База участников</h1>
+            </div>
             <div style={{ fontSize:13, opacity:0.8, marginTop:2 }}>
               {session.user.email} {isJCC?'· <span style="color:#7dd3fc">JCC</span>':''} · Семей: {families.length} · Человек: {totalMembers}
               {!isJCC && <span style={{ color:"#fca5a5",fontWeight:700 }}> · Срочно: {urgentCount}</span>}
@@ -1749,9 +2170,21 @@ export default function App() {
         />
       )}
 
-      {showImport && <ImportModal onClose={()=>setShowImport(false)} allPrograms={allPrograms} families={families} setFamilies={setFamilies} session={session} />}
+      {showImport && <ImportModal onClose={()=>setShowImport(false)} allPrograms={allPrograms} setAllPrograms={setAllPrograms} families={families} setFamilies={setFamilies} session={session} />}
 
-      {showLogs && <LogsModal onClose={()=>setShowLogs(false)} />}
+      {showLogs && (
+        <LogsModal
+          onClose={()=>setShowLogs(false)}
+          families={families}
+          allPrograms={allPrograms}
+          onOpenMember={(fam,memberId)=>{ setShowLogs(false); setPersonModal({family:fam, scrollToMemberId:memberId}); }}
+          onOpenFamily={(fam)=>{ setShowLogs(false); setModal(fam); }}
+          onMergeMembers={mergeDuplicateMembers}
+          onMergeFamilies={mergeDuplicateFamilies}
+          onDeleteMember={deleteMemberFromFamily}
+          onDeleteFamily={deleteFamily}
+        />
+      )}
 
       {showPrograms && (
         <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.75)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
@@ -1761,7 +2194,7 @@ export default function App() {
               <button onClick={()=>setShowPrograms(false)} style={{ background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",borderRadius:8,padding:"4px 12px",cursor:"pointer",fontSize:18 }}>✕</button>
             </div>
             <div style={{ padding:24 }}>
-              <JCCProgramsManager allPrograms={allPrograms} onProgramsChange={setAllPrograms} />
+              <JCCProgramsManager allPrograms={allPrograms} onProgramsChange={setAllPrograms} families={families} />
             </div>
           </div>
         </div>
