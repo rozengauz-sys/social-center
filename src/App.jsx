@@ -416,7 +416,7 @@ function VisitsReadOnly({ visits }) {
 
 // ── Excel Export ──────────────────────────────────────────────────────────
 function exportExcel(families) {
-  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Учётный номер","Телефон","Email","Аллергии/мед. особенности","Мадрих","Волонтёр","Еврейские корни","Согласие на обработку данных","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
+  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Учётный номер","Телефон","Email","Аллергии/мед. особенности","Мадрих","Волонтёр","Еврейские корни","Согласие на обработку данных","В базе с","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
   const rows = [headers];
   families.forEach(f => {
     const totalAid = (f.aid||[]).reduce((s,a)=>s+(parseFloat(a.amount)||0),0);
@@ -436,6 +436,7 @@ function exportExcel(families) {
         m?.isVolunteer?"Да":"Нет",
         m?.hasJewishRoots?"Да":"Нет",
         m?.dataConsent?"Да":"Нет",
+        m?.createdAt ? formatDate(m.createdAt) : "",
         f.city||"", f.address||"",
         f.specialNeeds?"Да":"Нет",
         f.socialCenter?"Да":"Нет",
@@ -761,6 +762,7 @@ function PersonCard({ member, family, isJCC, onEdit }) {
           </div>
           <div style={{ fontSize:12, color:"#64748b", marginTop:2 }}>
             🏠 {family.familyName} · {member.dob?`${formatDate(member.dob)}${age!==null?` (${age} лет)`:""}`:""} {member.phone?`· 📞 ${member.phone}`:""}
+            {member.createdAt && <span> · 🗓 в базе с {formatDate(member.createdAt)}</span>}
           </div>
           {family.specialNeeds && <span style={{ background:"#fef3c7",color:"#92400e",border:"1px solid #fcd34d",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700,marginTop:4,display:"inline-block" }}>⭐ Special Needs</span>}
         </div>
@@ -1149,7 +1151,7 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
             nextVisit: "",
             aid: [],
             visits: [],
-            members: newMembers,
+            members: newMembers.map(m=>({ ...m, createdAt:new Date().toISOString() })),
             jccPrograms: []
           };
           const { data, error } = await supabase.from("families").insert(toDB(newFamily)).select();
@@ -1199,7 +1201,7 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
               updatedMembers[existIdx] = { ...old, ...newM, id:old.id };
             } else {
               // New person in existing family
-              updatedMembers.push(newM);
+              updatedMembers.push({ ...newM, createdAt:new Date().toISOString() });
               changes.push({ person:`${newM.lastName} ${newM.firstName}`, fields:[{ field:"Статус", was:"", became:"Новый участник добавлен в семью" }] });
             }
           }
@@ -1757,6 +1759,9 @@ function DuplicatePeopleCard({ group, onMerge, onEdit, onDelete, badge }) {
     merged.jcc = jccSide.member.jcc || { active:false, programs:[] };
     merged.isMadrich = !!(a.member.isMadrich || b.member.isMadrich);
     merged.isVolunteer = !!(a.member.isVolunteer || b.member.isVolunteer);
+    // Дата добавления — не выбирается вручную; при объединении двойников
+    // сохраняем более раннюю (это и есть настоящая дата появления в базе).
+    merged.createdAt = [a.member.createdAt, b.member.createdAt].filter(Boolean).sort()[0] || "";
     await onMerge({ familyIdA:a.family.id, memberIdA:a.member.id, familyIdB:b.family.id, memberIdB:b.member.id, merged });
     setBusy(false);
   };
@@ -2215,8 +2220,17 @@ export default function App() {
   };
 
   const saveFamily = async (form) => {
+    const existingFamily = families.find(f=>f.id===form.id);
+    const isNew = form.id==="new"||!existingFamily;
+    // Дата добавления участника в базу — проставляется системой один раз,
+    // при первом сохранении, и дальше никогда не меняется вручную. Для
+    // записей, заведённых до появления этого поля, дата остаётся пустой —
+    // нечестно было бы задним числом подставить сегодняшнюю дату.
+    form = { ...form, members: (form.members||[]).map(m => {
+      const prevM = existingFamily?.members?.find(om=>om.id===m.id);
+      return { ...m, createdAt: prevM ? (prevM.createdAt||"") : new Date().toISOString() };
+    }) };
     const row = toDB(form);
-    const isNew = form.id==="new"||!families.find(f=>f.id===form.id);
     if (isNew) {
       const {data,error} = await supabase.from("families").insert(row).select();
       if (error) { alert("Ошибка: "+error.message); return; }
