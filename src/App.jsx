@@ -909,17 +909,17 @@ const IMPORT_COLUMNS = [
   { key:"firstName",    match:/(?:^|[^а-яё])имя(?!.*семь)/i },
   { key:"dob",          match:/дата\s*рожд/i },
   { key:"relation",     match:/родств/i },
-  { key:"misCode",      match:/учет\w*\s*ном|учёт\w*\s*ном|\bmis\b/i },
+  { key:"misCode",      match:/учет[а-яё]*\s*ном|учёт[а-яё]*\s*ном|\bmis\b/i },
   { key:"phone",        match:/телефон/i },
   { key:"email",        match:/e-?mail/i },
-  { key:"medicalNotes", match:/аллерг|мед\w*\s*особенн/i },
+  { key:"medicalNotes", match:/аллерг|мед[а-яё]*\s*особенн/i },
   { key:"city",         match:/город/i },
   { key:"address",      match:/адрес/i },
   { key:"specialNeeds", match:/special\s*needs/i },
-  { key:"socialCenter", match:/социальн\w*\s*центр/i },
+  { key:"socialCenter", match:/социальн[а-яё]*\s*центр/i },
   { key:"isMadrich",    match:/мадрих/i },
   { key:"isVolunteer",  match:/волонт/i },
-  { key:"hasJewishRoots", match:/евр\w*\s*корн/i },
+  { key:"hasJewishRoots", match:/евр[а-яё]*\s*корн/i },
   { key:"dataConsent",  match:/согласи/i },
   { key:"jccActive",    match:/^\s*jcc\b(?!.*программ)/i },
   { key:"jccPrograms",  match:/программ/i },
@@ -927,14 +927,22 @@ const IMPORT_COLUMNS = [
 function buildColumnMap(headerRow) {
   const map = {};
   const used = new Set();
+  // Positional fallback is only trustworthy when the file has exactly the
+  // expected number of columns — i.e. it matches the current template shape.
+  // Otherwise (an older export missing a since-inserted column, or an extra
+  // one) blindly trusting position risks one unmatched field silently
+  // stealing a *different*, correctly-named column further down the row,
+  // which then cascades into every field after it reading the wrong data.
+  // In that case an unmatched field is left unmapped (empty) instead.
+  const trustPosition = headerRow.length === IMPORT_COLUMNS.length;
   IMPORT_COLUMNS.forEach((col, defaultIdx) => {
     let foundIdx = -1;
     for (let i=0; i<headerRow.length; i++) {
       if (used.has(i)) continue;
       if (col.match.test(headerRow[i]||"")) { foundIdx = i; break; }
     }
-    if (foundIdx === -1) foundIdx = defaultIdx; // fall back to canonical position
-    used.add(foundIdx);
+    if (foundIdx === -1 && trustPosition) foundIdx = defaultIdx; // fall back to canonical position
+    if (foundIdx !== -1) used.add(foundIdx);
     map[col.key] = foundIdx;
   });
   return map;
