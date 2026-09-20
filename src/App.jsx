@@ -265,7 +265,7 @@ function MembersEditor({ members, onChange, allPrograms, isHesed }) {
             <label style={labelStyle}>Имя *<input style={inputStyle} value={m.firstName} onChange={e=>upd(m.id,"firstName",e.target.value)} placeholder="Иван" /></label>
             <label style={labelStyle}>Дата рождения<input type="date" style={inputStyle} value={m.dob} onChange={e=>upd(m.id,"dob",e.target.value)} /></label>
             <label style={labelStyle}>Степень родства<input style={inputStyle} value={m.relation} onChange={e=>upd(m.id,"relation",e.target.value)} placeholder="Муж, жена, сын..." /></label>
-            <label style={labelStyle}>Код MIS<input style={inputStyle} value={m.misCode} onChange={e=>upd(m.id,"misCode",e.target.value)} placeholder="MIS-001" /></label>
+            <label style={labelStyle}>Учётный номер<input style={inputStyle} value={m.misCode} onChange={e=>upd(m.id,"misCode",e.target.value)} placeholder="У-001" /></label>
             <label style={labelStyle}>Телефон<input style={inputStyle} value={m.phone} onChange={e=>upd(m.id,"phone",e.target.value)} placeholder="+972-50-000-0000" /></label>
             <label style={{ ...labelStyle, gridColumn:"1/-1" }}>Email<input type="email" style={inputStyle} value={m.email} onChange={e=>upd(m.id,"email",e.target.value)} placeholder="ivan@example.com" /></label>
             <label style={{ ...labelStyle, gridColumn:"1/-1" }}>Аллергии, медицинские особенности и другое
@@ -407,7 +407,7 @@ function VisitsReadOnly({ visits }) {
 
 // ── Excel Export ──────────────────────────────────────────────────────────
 function exportExcel(families) {
-  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Код MIS","Телефон","Email","Аллергии/мед. особенности","Мадрих","Волонтёр","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
+  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Учётный номер","Телефон","Email","Аллергии/мед. особенности","Мадрих","Волонтёр","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
   const rows = [headers];
   families.forEach(f => {
     const totalAid = (f.aid||[]).reduce((s,a)=>s+(parseFloat(a.amount)||0),0);
@@ -462,7 +462,7 @@ function exportPDF(families) {
           <div class="mgrid">
             <div class="f"><div class="fl">Дата рождения</div><div class="fv">${formatDate(m.dob)}</div></div>
             <div class="f"><div class="fl">Возраст</div><div class="fv">${calcAge(m.dob)??'—'} лет</div></div>
-            <div class="f"><div class="fl">Код MIS</div><div class="fv">${m.misCode||"—"}</div></div>
+            <div class="f"><div class="fl">Учётный номер</div><div class="fv">${m.misCode||"—"}</div></div>
             <div class="f"><div class="fl">Телефон</div><div class="fv">${m.phone||"—"}</div></div>
             <div class="f"><div class="fl">Email</div><div class="fv">${m.email||"—"}</div></div>
             ${m.medicalNotes?.trim()?`<div class="f medical" style="grid-column:1/-1"><div class="fl">⚠️ Аллергии/мед. особенности</div><div class="fv">${m.medicalNotes}</div></div>`:""}
@@ -756,7 +756,7 @@ function PersonCard({ member, family, isJCC, onEdit }) {
       {expanded && (
         <div style={{ padding:"0 20px 16px", borderTop:"1px solid #f1f5f9", display:"flex", flexDirection:"column", gap:10 }}>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:8 }}>
-            {member.misCode && <div style={{ background:"#f8fafc",borderRadius:7,padding:"7px 10px" }}><div style={{ fontSize:10,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Код MIS</div><div style={{ fontSize:13,fontWeight:600 }}>{member.misCode}</div></div>}
+            {member.misCode && <div style={{ background:"#f8fafc",borderRadius:7,padding:"7px 10px" }}><div style={{ fontSize:10,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Учётный номер</div><div style={{ fontSize:13,fontWeight:600 }}>{member.misCode}</div></div>}
             {member.email && <div style={{ background:"#f8fafc",borderRadius:7,padding:"7px 10px" }}><div style={{ fontSize:10,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Email</div><div style={{ fontSize:13,fontWeight:600 }}>{member.email}</div></div>}
             {family.city && <div style={{ background:"#f8fafc",borderRadius:7,padding:"7px 10px" }}><div style={{ fontSize:10,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Город</div><div style={{ fontSize:13,fontWeight:600 }}>{family.city}</div></div>}
             {family.address && <div style={{ background:"#f8fafc",borderRadius:7,padding:"7px 10px" }}><div style={{ fontSize:10,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Адрес</div><div style={{ fontSize:13,fontWeight:600 }}>{family.address}</div></div>}
@@ -788,7 +788,7 @@ function PersonCard({ member, family, isJCC, onEdit }) {
                         <div style={{ padding:"10px 12px",borderTop:"1px solid #e2e8f0",background:"#faf5ff",display:"flex",flexDirection:"column",gap:6 }}>
                           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6 }}>
                             {r.dob && <div style={{ background:"#fff",borderRadius:6,padding:"6px 9px" }}><div style={{ fontSize:9,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Дата рождения</div><div style={{ fontSize:12,fontWeight:600 }}>{formatDate(r.dob)}{rAge!==null?` (${rAge} лет)`:""}</div></div>}
-                            {r.misCode && <div style={{ background:"#fff",borderRadius:6,padding:"6px 9px" }}><div style={{ fontSize:9,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Код MIS</div><div style={{ fontSize:12,fontWeight:600 }}>{r.misCode}</div></div>}
+                            {r.misCode && <div style={{ background:"#fff",borderRadius:6,padding:"6px 9px" }}><div style={{ fontSize:9,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Учётный номер</div><div style={{ fontSize:12,fontWeight:600 }}>{r.misCode}</div></div>}
                             {r.phone && <div style={{ background:"#fff",borderRadius:6,padding:"6px 9px" }}><div style={{ fontSize:9,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Телефон</div><div style={{ fontSize:12,fontWeight:600 }}>{r.phone}</div></div>}
                             {r.email && <div style={{ background:"#fff",borderRadius:6,padding:"6px 9px",gridColumn:"1/-1" }}><div style={{ fontSize:9,color:"#94a3b8",fontWeight:700,textTransform:"uppercase" }}>Email</div><div style={{ fontSize:12,fontWeight:600 }}>{r.email}</div></div>}
                           </div>
@@ -842,7 +842,7 @@ function downloadTemplate() {
     "Имя *",
     "Дата рождения (ДД.ММ.ГГГГ)",
     "Степень родства",
-    "Код MIS",
+    "Учётный номер",
     "Телефон",
     "Email",
     "Аллергии, медицинские особенности и другое",
@@ -855,9 +855,9 @@ function downloadTemplate() {
     "JCC (Да/Нет)",
     "Программы JCC (через запятую)"
   ];
-  const example1 = ["Семья Иванов","Иванов","Иван","15.03.1942","Глава семьи","MIS-001","+972501234567","ivan@example.com","","Тель-Авив","ул. Герцля 5","Нет","Да","Нет","Нет","Да","Беяхад Кидс, Лекции"];
-  const example2 = ["Семья Иванов","Иванова","Сара","22.07.1945","Супруга","MIS-002","+972501234568","","Аллергия на орехи","Тель-Авив","ул. Герцля 5","Да","Да","Нет","Нет","Нет",""];
-  const example3 = ["Семья Коэн","Коэн","Давид","01.01.1938","","MIS-003","","","","Хайфа","пр. Мира 12","Нет","Нет","Нет","Да","Да","Лагеря"];
+  const example1 = ["Семья Иванов","Иванов","Иван","15.03.1942","Глава семьи","У-001","+972501234567","ivan@example.com","","Тель-Авив","ул. Герцля 5","Нет","Да","Нет","Нет","Да","Беяхад Кидс, Лекции"];
+  const example2 = ["Семья Иванов","Иванова","Сара","22.07.1945","Супруга","У-002","+972501234568","","Аллергия на орехи","Тель-Авив","ул. Герцля 5","Да","Да","Нет","Нет","Нет",""];
+  const example3 = ["Семья Коэн","Коэн","Давид","01.01.1938","","У-003","","","","Хайфа","пр. Мира 12","Нет","Нет","Нет","Да","Да","Лагеря"];
 
   const rows = [headers, example1, example2, example3];
   const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\n");
@@ -893,7 +893,7 @@ const IMPORT_COLUMNS = [
   { key:"firstName",    match:/(?:^|[^а-яё])имя(?!.*семь)/i },
   { key:"dob",          match:/дата\s*рожд/i },
   { key:"relation",     match:/родств/i },
-  { key:"misCode",      match:/\bmis\b/i },
+  { key:"misCode",      match:/учет\w*\s*ном|учёт\w*\s*ном|\bmis\b/i },
   { key:"phone",        match:/телефон/i },
   { key:"email",        match:/e-?mail/i },
   { key:"medicalNotes", match:/аллерг|мед\w*\s*особенн/i },
@@ -976,7 +976,7 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
     const { data: dbFamilies } = await supabase.from("families").select("*").order("family_name");
     const currentFamilies = (dbFamilies||[]).map(fromDB);
 
-    // ── Duplicate / MIS-code conflict pre-scan ────────────────────────────
+    // ── Duplicate / registry-number conflict pre-scan ─────────────────────
     // Flags possible двойники and identifier collisions before writing, so staff
     // can review in the report and merge/fix via the "Проверка данных" tab.
     const flatImportRows = [];
@@ -1151,7 +1151,7 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
               checkField("Телефон", old.phone, newM.phone);
               checkField("Email", old.email, newM.email);
               checkField("Аллергии/мед. особенности", old.medicalNotes, newM.medicalNotes);
-              checkField("Код MIS", old.misCode, newM.misCode);
+              checkField("Учётный номер", old.misCode, newM.misCode);
               checkField("Степень родства", old.relation, newM.relation);
               checkField("Мадрих", old.isMadrich?"Да":"Нет", newM.isMadrich?"Да":"Нет");
               checkField("Волонтёр", old.isVolunteer?"Да":"Нет", newM.isVolunteer?"Да":"Нет");
@@ -1300,10 +1300,10 @@ function ImportReport({ report, onClose }) {
 
       {report.misConflicts?.length>0 && (
         <div style={{ background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:14 }}>
-          <div style={{ fontWeight:700,fontSize:13,color:"#991b1b",marginBottom:8 }}>⚠️ Один код MIS у разных людей ({report.misConflicts.length})</div>
+          <div style={{ fontWeight:700,fontSize:13,color:"#991b1b",marginBottom:8 }}>⚠️ Один учётный номер у разных людей ({report.misConflicts.length})</div>
           {report.misConflicts.map((c,i)=>(
             <div key={i} style={{ fontSize:13,color:"#7f1d1d",marginBottom:4 }}>
-              Код <b>{c.misCode}</b>: <b>{c.person}</b> (семья «{c.family}») и <b>{c.conflictsWith}</b> (семья «{c.conflictsFamily}»)
+              Учётный номер <b>{c.misCode}</b>: <b>{c.person}</b> (семья «{c.family}») и <b>{c.conflictsWith}</b> (семья «{c.conflictsFamily}»)
             </div>
           ))}
           <div style={{ fontSize:12,color:"#991b1b",marginTop:6 }}>Проверьте, не опечатка ли это в коде, или действительно ли это разные люди.</div>
@@ -1503,7 +1503,7 @@ const normKey = (s) => (s||"").trim().toLowerCase();
 const BROKEN_ICON = { missingName:"👤", badDob:"🎂", badPhone:"📞", badEmail:"✉️", jccNoPrograms:"🏛", orphanProgram:"🔗", emptyFamily:"🏠" };
 const MEMBER_COMPARE_FIELDS = [
   ["lastName","Фамилия"], ["firstName","Имя"], ["dob","Дата рождения"],
-  ["relation","Степень родства"], ["misCode","Код MIS"], ["phone","Телефон"], ["email","Email"],
+  ["relation","Степень родства"], ["misCode","Учётный номер"], ["phone","Телефон"], ["email","Email"],
   ["medicalNotes","Аллергии/мед. особенности"],
 ];
 const FAMILY_COMPARE_FIELDS = [
@@ -1839,7 +1839,7 @@ function HealthTab({ families, allPrograms, onOpenMember, onOpenFamily, onMergeM
   return (
     <div>
       <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }}>
-        {[["summary","📊 Сводка"],["dupPeople",`👥 Дубли людей (${dupPeople.length})`],["dupMis",`🆔 Дубли по MIS (${dupMis.length})`],["dupFamilies",`🏠 Дубли семей (${dupFamilies.length})`],["broken",`⚠️ Ошибки данных (${broken.length})`]].map(([k,l])=>(
+        {[["summary","📊 Сводка"],["dupPeople",`👥 Дубли людей (${dupPeople.length})`],["dupMis",`🆔 Дубли по учётному номеру (${dupMis.length})`],["dupFamilies",`🏠 Дубли семей (${dupFamilies.length})`],["broken",`⚠️ Ошибки данных (${broken.length})`]].map(([k,l])=>(
           <button key={k} onClick={()=>setSubtab(k)} style={{ padding:"5px 12px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:12,fontWeight:600,
             background:subtab===k?"#6366f1":"#fff",color:subtab===k?"#fff":"#475569",borderColor:subtab===k?"#6366f1":"#e2e8f0" }}>{l}</button>
         ))}
@@ -1848,7 +1848,7 @@ function HealthTab({ families, allPrograms, onOpenMember, onOpenFamily, onMergeM
       {subtab==="summary" && (
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
           <HealthStat label="Дубли людей" count={dupPeople.length} color="#dc2626" onClick={()=>setSubtab("dupPeople")} />
-          <HealthStat label="Дубли по коду MIS" count={dupMis.length} color="#dc2626" onClick={()=>setSubtab("dupMis")} />
+          <HealthStat label="Дубли по учётному номеру" count={dupMis.length} color="#dc2626" onClick={()=>setSubtab("dupMis")} />
           <HealthStat label="Дубли семей" count={dupFamilies.length} color="#d97706" onClick={()=>setSubtab("dupFamilies")} />
           <HealthStat label="Ошибки в данных" count={broken.length} color="#d97706" onClick={()=>setSubtab("broken")} />
         </div>
@@ -1858,7 +1858,7 @@ function HealthTab({ families, allPrograms, onOpenMember, onOpenFamily, onMergeM
           badge={item.crossScript ? "🔤 Похоже, один человек — имя записано кириллицей и латиницей" : undefined} />
       ))}
       {subtab==="dupMis" && (dupMis.length===0 ? <NoIssues/> : dupMis.map((g,i)=>
-        <DuplicatePeopleCard key={i} group={g} onMerge={onMergeMembers} onEdit={onOpenMember} onDelete={onDeleteMember} badge="Совпадает код MIS" />
+        <DuplicatePeopleCard key={i} group={g} onMerge={onMergeMembers} onEdit={onOpenMember} onDelete={onDeleteMember} badge="Совпадает учётный номер" />
       ))}
       {subtab==="dupFamilies" && (dupFamilies.length===0 ? <NoIssues/> : dupFamilies.map((item,i)=>
         <DuplicateFamilyCard key={i} group={item.group} onMerge={onMergeFamilies} onEdit={onOpenFamily} onDelete={onDeleteFamily}
@@ -2115,7 +2115,7 @@ export default function App() {
   const diffMembers = async (oldMembers, newMembers, familyName) => {
     const MEMBER_FIELDS = [
       ["lastName","Фамилия"],["firstName","Имя"],["dob","Дата рождения"],
-      ["relation","Степень родства"],["misCode","Код MIS"],["phone","Телефон"],
+      ["relation","Степень родства"],["misCode","Учётный номер"],["phone","Телефон"],
       ["email","Email"],["medicalNotes","Аллергии/мед. особенности"],
       ["isMadrich","Мадрих"],["isVolunteer","Волонтёр"]
     ];
