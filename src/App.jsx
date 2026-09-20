@@ -976,6 +976,89 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
     const { data: dbFamilies } = await supabase.from("families").select("*").order("family_name");
     const currentFamilies = (dbFamilies||[]).map(fromDB);
 
+    // ── Duplicate / MIS-code conflict pre-scan ────────────────────────────
+    // Flags possible двойники and identifier collisions before writing, so staff
+    // can review in the report and merge/fix via the "Проверка данных" tab.
+    const flatImportRows = [];
+    Object.entries(familyMap).forEach(([familyName, frows]) => {
+      frows.forEach(r => {
+        const lastName = r[cm.lastName]?.trim()||"";
+        const firstName = r[cm.firstName]?.trim()||"";
+        if (!lastName || !firstName) return;
+        flatImportRows.push({
+          familyName, lastName, firstName,
+          misCode: r[cm.misCode]?.trim()||"",
+          canLast: nameToCanonicalLatin(lastName), canFirst: nameToCanonicalLatin(firstName),
+        });
+      });
+    });
+    const existingEntries = [];
+    currentFamilies.forEach(f => (f.members||[]).forEach(m => {
+      if (m.lastName?.trim() && m.firstName?.trim()) {
+        existingEntries.push({
+          family:f, member:m,
+          canLast: nameToCanonicalLatin(m.lastName), canFirst: nameToCanonicalLatin(m.firstName),
+        });
+      }
+    }));
+    const existingByMis = {};
+    existingEntries.forEach(e => {
+      const k = normKey(e.member.misCode);
+      if (k) (existingByMis[k] ||= []).push(e);
+    });
+    const nameMatches = (aLast, aFirst, bLast, bFirst) =>
+      (normKey(aLast)===normKey(bLast) && normKey(aFirst)===normKey(bFirst)) ||
+      (namesAreCloseLv(aLast, bLast) && namesAreCloseLv(aFirst, bFirst));
+
+    const possibleDuplicates = [];
+    flatImportRows.forEach(row => {
+      existingEntries.forEach(e => {
+        if (e.family.familyName.trim().toLowerCase() === row.familyName.trim().toLowerCase()) return;
+        if (!nameMatches(row.canLast, row.canFirst, e.canLast, e.canFirst)) return;
+        possibleDuplicates.push({
+          person: `${row.lastName} ${row.firstName}`, family: row.familyName,
+          matched: `${e.member.lastName} ${e.member.firstName}`, matchedFamily: e.family.familyName,
+          source: "existing",
+        });
+      });
+    });
+    for (let i=0; i<flatImportRows.length; i++) for (let j=i+1; j<flatImportRows.length; j++) {
+      const a = flatImportRows[i], b = flatImportRows[j];
+      if (a.familyName.trim().toLowerCase() === b.familyName.trim().toLowerCase()) continue;
+      if (!nameMatches(a.canLast, a.canFirst, b.canLast, b.canFirst)) continue;
+      possibleDuplicates.push({
+        person: `${a.lastName} ${a.firstName}`, family: a.familyName,
+        matched: `${b.lastName} ${b.firstName}`, matchedFamily: b.familyName,
+        source: "file",
+      });
+    }
+
+    const misConflicts = [];
+    flatImportRows.forEach(row => {
+      if (!row.misCode) return;
+      const k = normKey(row.misCode);
+      (existingByMis[k]||[]).forEach(e => {
+        if (nameMatches(row.canLast, row.canFirst, e.canLast, e.canFirst)) return; // тот же человек — это обновление, не конфликт
+        misConflicts.push({
+          misCode: row.misCode, person: `${row.lastName} ${row.firstName}`, family: row.familyName,
+          conflictsWith: `${e.member.lastName} ${e.member.firstName}`, conflictsFamily: e.family.familyName,
+        });
+      });
+    });
+    const byMisInFile = {};
+    flatImportRows.forEach(r => { if (r.misCode) (byMisInFile[normKey(r.misCode)] ||= []).push(r); });
+    Object.values(byMisInFile).forEach(group => {
+      if (group.length<2) return;
+      for (let i=0; i<group.length; i++) for (let j=i+1; j<group.length; j++) {
+        const a=group[i], b=group[j];
+        if (nameMatches(a.canLast,a.canFirst,b.canLast,b.canFirst)) continue;
+        misConflicts.push({
+          misCode: a.misCode, person: `${a.lastName} ${a.firstName}`, family: a.familyName,
+          conflictsWith: `${b.lastName} ${b.firstName}`, conflictsFamily: b.familyName,
+        });
+      }
+    });
+
     // Pre-scan all rows for JCC program names not yet in the reference list,
     // and create them up front so no member ends up referencing an
     // unpersisted/orphaned program id.
@@ -1129,7 +1212,7 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
     }
 
     // Save log to Supabase
-    const summary = { created, updated, errors, autoCreatedPrograms, total_rows:rows.length, filename:file.name };
+    const summary = { created, updated, errors, autoCreatedPrograms, possibleDuplicates, misConflicts, total_rows:rows.length, filename:file.name };
     await supabase.from("import_logs").insert({
       imported_by: session.user.email,
       summary,
@@ -1202,6 +1285,31 @@ function ImportReport({ report, onClose }) {
           <div style={{ fontSize:12,color:report.errors.length>0?"#991b1b":"#64748b",fontWeight:600 }}>Ошибок</div>
         </div>
       </div>
+      {report.possibleDuplicates?.length>0 && (
+        <div style={{ background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:14 }}>
+          <div style={{ fontWeight:700,fontSize:13,color:"#9a3412",marginBottom:8 }}>⚠️ Возможные двойники ({report.possibleDuplicates.length})</div>
+          {report.possibleDuplicates.map((d,i)=>(
+            <div key={i} style={{ fontSize:13,color:"#7c2d12",marginBottom:4 }}>
+              <b>{d.person}</b> (семья «{d.family}») похож{d.source==="file"?" на":" на уже существующего"} <b>{d.matched}</b> (семья «{d.matchedFamily}»)
+              {d.source==="file" ? " — обе записи в этом файле" : ""}
+            </div>
+          ))}
+          <div style={{ fontSize:12,color:"#9a3412",marginTop:6 }}>Проверьте во вкладке «Проверка данных» — там можно объединить совпадающих участников/семьи.</div>
+        </div>
+      )}
+
+      {report.misConflicts?.length>0 && (
+        <div style={{ background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:14 }}>
+          <div style={{ fontWeight:700,fontSize:13,color:"#991b1b",marginBottom:8 }}>⚠️ Один код MIS у разных людей ({report.misConflicts.length})</div>
+          {report.misConflicts.map((c,i)=>(
+            <div key={i} style={{ fontSize:13,color:"#7f1d1d",marginBottom:4 }}>
+              Код <b>{c.misCode}</b>: <b>{c.person}</b> (семья «{c.family}») и <b>{c.conflictsWith}</b> (семья «{c.conflictsFamily}»)
+            </div>
+          ))}
+          <div style={{ fontSize:12,color:"#991b1b",marginTop:6 }}>Проверьте, не опечатка ли это в коде, или действительно ли это разные люди.</div>
+        </div>
+      )}
+
       {report.autoCreatedPrograms?.length>0 && (
         <div style={{ background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:14 }}>
           <div style={{ fontWeight:700,fontSize:13,color:"#92400e",marginBottom:6 }}>🆕 Автоматически созданы новые программы JCC ({report.autoCreatedPrograms.length})</div>
