@@ -239,6 +239,7 @@ const emptyMember = () => ({
   lastName:"", firstName:"", dob:"", relation:"", misCode:"", phone:"", email:"",
   medicalNotes:"",
   isMadrich: false, isVolunteer: false,
+  hasJewishRoots: false, dataConsent: false,
   jcc: { active: false, programs: [] }
 });
 
@@ -280,6 +281,14 @@ function MembersEditor({ members, onChange, allPrograms, isHesed }) {
             <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
               <input type="checkbox" checked={!!m.isVolunteer} onChange={e=>upd(m.id,"isVolunteer",e.target.checked)} style={{ accentColor:"#0891b2", width:16, height:16 }} />
               <span style={{ fontSize:13, fontWeight:700, color:"#0891b2" }}>&#129309; Волонтёр</span>
+            </label>
+            <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+              <input type="checkbox" checked={!!m.hasJewishRoots} onChange={e=>upd(m.id,"hasJewishRoots",e.target.checked)} style={{ accentColor:"#2563eb", width:16, height:16 }} />
+              <span style={{ fontSize:13, fontWeight:700, color:"#2563eb" }}>✡️ Еврейские корни</span>
+            </label>
+            <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+              <input type="checkbox" checked={!!m.dataConsent} onChange={e=>upd(m.id,"dataConsent",e.target.checked)} style={{ accentColor:"#16a34a", width:16, height:16 }} />
+              <span style={{ fontSize:13, fontWeight:700, color:"#16a34a" }}>✅ Согласие на обработку данных</span>
             </label>
           </div>
           {!isHesed && <MemberJCC member={m} allPrograms={allPrograms} onChange={updated=>updMember(m.id,updated)} />}
@@ -407,7 +416,7 @@ function VisitsReadOnly({ visits }) {
 
 // ── Excel Export ──────────────────────────────────────────────────────────
 function exportExcel(families) {
-  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Учётный номер","Телефон","Email","Аллергии/мед. особенности","Мадрих","Волонтёр","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
+  const headers = ["Семья","Фамилия","Имя","Дата рождения","Возраст","Несовершеннолетний","Степень родства","Учётный номер","Телефон","Email","Аллергии/мед. особенности","Мадрих","Волонтёр","Еврейские корни","Согласие на обработку данных","Город","Адрес","Special Needs","Социальный центр","JCC","Программы JCC","Следующий визит","Помощь итого (€)","Комментарий"];
   const rows = [headers];
   families.forEach(f => {
     const totalAid = (f.aid||[]).reduce((s,a)=>s+(parseFloat(a.amount)||0),0);
@@ -425,6 +434,8 @@ function exportExcel(families) {
         m?.medicalNotes||"",
         m?.isMadrich?"Да":"Нет",
         m?.isVolunteer?"Да":"Нет",
+        m?.hasJewishRoots?"Да":"Нет",
+        m?.dataConsent?"Да":"Нет",
         f.city||"", f.address||"",
         f.specialNeeds?"Да":"Нет",
         f.socialCenter?"Да":"Нет",
@@ -672,6 +683,7 @@ function FamilyCard({ family, onEdit, onDelete, isJCC, isHesed }) {
                     {m.jcc?.active && <span style={{ background:"#e0f2fe",color:"#0369a1",border:"1px solid #7dd3fc",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🏛 JCC</span>}
                     {m.isMadrich && <span style={{ background:"#ede9fe",color:"#6d28d9",border:"1px solid #c4b5fd",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🎓 Мадрих</span>}
                     {m.isVolunteer && <span style={{ background:"#cffafe",color:"#0e7490",border:"1px solid #67e8f9",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🤝 Волонтёр</span>}
+                    {m.hasJewishRoots && <span style={{ background:"#dbeafe",color:"#1d4ed8",border:"1px solid #93c5fd",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>✡️ Евр. корни</span>}
                   </div>
                   <div style={{ display:"flex", gap:12, flexWrap:"wrap", fontSize:13, color:"#64748b" }}>
                     {m.dob && <span>📅 {formatDate(m.dob)}{calcAge(m.dob)!==null?` (${calcAge(m.dob)} лет)`:""}</span>}
@@ -744,6 +756,8 @@ function PersonCard({ member, family, isJCC, onEdit }) {
             {member.jcc?.active && <span style={{ background:"#e0f2fe",color:"#0369a1",border:"1px solid #7dd3fc",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🏛 JCC</span>}
             {member.isMadrich && <span style={{ background:"#ede9fe",color:"#6d28d9",border:"1px solid #c4b5fd",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🎓 Мадрих</span>}
             {member.isVolunteer && <span style={{ background:"#cffafe",color:"#0e7490",border:"1px solid #67e8f9",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>🤝 Волонтёр</span>}
+            {member.hasJewishRoots && <span style={{ background:"#dbeafe",color:"#1d4ed8",border:"1px solid #93c5fd",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>✡️ Евр. корни</span>}
+            {member.dataConsent && <span style={{ background:"#dcfce7",color:"#15803d",border:"1px solid #86efac",borderRadius:4,padding:"1px 6px",fontSize:11,fontWeight:700 }}>✅ Согласие на данные</span>}
           </div>
           <div style={{ fontSize:12, color:"#64748b", marginTop:2 }}>
             🏠 {family.familyName} · {member.dob?`${formatDate(member.dob)}${age!==null?` (${age} лет)`:""}`:""} {member.phone?`· 📞 ${member.phone}`:""}
@@ -852,12 +866,14 @@ function downloadTemplate() {
     "Социальный центр (Да/Нет)",
     "Мадрих (Да/Нет)",
     "Волонтёр (Да/Нет)",
+    "Еврейские корни (Да/Нет)",
+    "Согласие на обработку данных (Да/Нет)",
     "JCC (Да/Нет)",
     "Программы JCC (через запятую)"
   ];
-  const example1 = ["Семья Иванов","Иванов","Иван","15.03.1942","Глава семьи","У-001","+972501234567","ivan@example.com","","Тель-Авив","ул. Герцля 5","Нет","Да","Нет","Нет","Да","Беяхад Кидс, Лекции"];
-  const example2 = ["Семья Иванов","Иванова","Сара","22.07.1945","Супруга","У-002","+972501234568","","Аллергия на орехи","Тель-Авив","ул. Герцля 5","Да","Да","Нет","Нет","Нет",""];
-  const example3 = ["Семья Коэн","Коэн","Давид","01.01.1938","","У-003","","","","Хайфа","пр. Мира 12","Нет","Нет","Нет","Да","Да","Лагеря"];
+  const example1 = ["Семья Иванов","Иванов","Иван","15.03.1942","Глава семьи","У-001","+972501234567","ivan@example.com","","Тель-Авив","ул. Герцля 5","Нет","Да","Нет","Нет","Да","Да","Да","Беяхад Кидс, Лекции"];
+  const example2 = ["Семья Иванов","Иванова","Сара","22.07.1945","Супруга","У-002","+972501234568","","Аллергия на орехи","Тель-Авив","ул. Герцля 5","Да","Да","Нет","Нет","Да","Да","Нет",""];
+  const example3 = ["Семья Коэн","Коэн","Давид","01.01.1938","","У-003","","","","Хайфа","пр. Мира 12","Нет","Нет","Нет","Да","Нет","Нет","Да","Лагеря"];
 
   const rows = [headers, example1, example2, example3];
   const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\n");
@@ -903,6 +919,8 @@ const IMPORT_COLUMNS = [
   { key:"socialCenter", match:/социальн\w*\s*центр/i },
   { key:"isMadrich",    match:/мадрих/i },
   { key:"isVolunteer",  match:/волонт/i },
+  { key:"hasJewishRoots", match:/евр\w*\s*корн/i },
+  { key:"dataConsent",  match:/согласи/i },
   { key:"jccActive",    match:/^\s*jcc\b(?!.*программ)/i },
   { key:"jccPrograms",  match:/программ/i },
 ];
@@ -1103,6 +1121,8 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
             medicalNotes: r[cm.medicalNotes]?.trim()||"",
             isMadrich: parseBool(r[cm.isMadrich]),
             isVolunteer: parseBool(r[cm.isVolunteer]),
+            hasJewishRoots: parseBool(r[cm.hasJewishRoots]),
+            dataConsent: parseBool(r[cm.dataConsent]),
             jcc: { active: jccActive, programs: jccPrograms }
           };
         }).filter(m=>m.lastName&&m.firstName);
@@ -1155,6 +1175,8 @@ function ImportModal({ onClose, allPrograms, setAllPrograms, families, setFamili
               checkField("Степень родства", old.relation, newM.relation);
               checkField("Мадрих", old.isMadrich?"Да":"Нет", newM.isMadrich?"Да":"Нет");
               checkField("Волонтёр", old.isVolunteer?"Да":"Нет", newM.isVolunteer?"Да":"Нет");
+              checkField("Еврейские корни", old.hasJewishRoots?"Да":"Нет", newM.hasJewishRoots?"Да":"Нет");
+              checkField("Согласие на обработку данных", old.dataConsent?"Да":"Нет", newM.dataConsent?"Да":"Нет");
               const oldJCC = old.jcc?.active?"Да":"Нет";
               const newJCC = newM.jcc?.active?"Да":"Нет";
               checkField("JCC", oldJCC, newJCC);
@@ -1505,6 +1527,7 @@ const MEMBER_COMPARE_FIELDS = [
   ["lastName","Фамилия"], ["firstName","Имя"], ["dob","Дата рождения"],
   ["relation","Степень родства"], ["misCode","Учётный номер"], ["phone","Телефон"], ["email","Email"],
   ["medicalNotes","Аллергии/мед. особенности"],
+  ["hasJewishRoots","Еврейские корни"], ["dataConsent","Согласие на обработку данных"],
 ];
 const FAMILY_COMPARE_FIELDS = [
   ["familyName","Название семьи"], ["city","Город"], ["address","Адрес"],
@@ -1748,7 +1771,7 @@ function DuplicatePeopleCard({ group, onMerge, onEdit, onDelete, badge }) {
               <label key={field} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, marginBottom:3, cursor:"pointer" }}>
                 <input type="radio" name={`${field}-${a.member.id}-${b.member.id}`} checked={(choice[field]||(a.member[field]?"a":"b"))===side} onChange={()=>pick(field,side)} />
                 <span style={{ color:"#64748b", width:100, flexShrink:0 }}>{label}:</span>
-                <span style={{ fontWeight:600 }}>{entry.member[field]||"—"}</span>
+                <span style={{ fontWeight:600 }}>{typeof entry.member[field]==="boolean" ? (entry.member[field]?"Да":"Нет") : (entry.member[field]||"—")}</span>
               </label>
             ))}
           </div>
@@ -2117,7 +2140,8 @@ export default function App() {
       ["lastName","Фамилия"],["firstName","Имя"],["dob","Дата рождения"],
       ["relation","Степень родства"],["misCode","Учётный номер"],["phone","Телефон"],
       ["email","Email"],["medicalNotes","Аллергии/мед. особенности"],
-      ["isMadrich","Мадрих"],["isVolunteer","Волонтёр"]
+      ["isMadrich","Мадрих"],["isVolunteer","Волонтёр"],
+      ["hasJewishRoots","Еврейские корни"],["dataConsent","Согласие на обработку данных"]
     ];
     for (const nm of newMembers) {
       const om = oldMembers.find(m=>m.id===nm.id);
